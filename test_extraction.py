@@ -562,11 +562,10 @@ def extract_ieee_reference_info_fixed(ref_text):
 
 def extract_apa_reference_info_fixed(ref_text):
     """
-    完全重寫的 APA 格式擷取（超級修正版）
-    ✅ 正確處理各種 APA 格式變體
+    APA 格式擷取（修正多作者問題）
     """
     
-    # 步驟 1：找年份（必須有括號）
+    # 找年份（必須有括號）
     year_match = re.search(r'[（(]\s*(\d{4}[a-z]?|n\.d\.)\s*[）)]', ref_text, re.IGNORECASE)
     
     if not year_match:
@@ -579,50 +578,33 @@ def extract_apa_reference_info_fixed(ref_text):
     year_text = year_match.group(1)
     year = year_text[:4] if year_text.lower() != 'n.d.' else 'n.d.'
     
-    # 步驟 2：提取作者（年份前的內容）
+    # 提取作者（年份前的內容）
     before_year = ref_text[:year_match.start()].strip()
     author = "Unknown"
     
     if before_year:
-        # 處理各種作者格式
-        # 格式 1: "LastName, F. M." → 取 LastName
-        # 格式 2: "LastName, FirstName" → 取 LastName
-        # 格式 3: "Organization Name" → 取全名
-        
         # 移除末尾的標點和空格
         before_year = before_year.rstrip(',，. ')
         
-        # 嘗試找第一個逗號（通常在姓氏後）
-        first_comma_pos = before_year.find(',')
-        
-        if first_comma_pos > 0:
-            # 有逗號：取逗號前的內容
-            potential_author = before_year[:first_comma_pos].strip()
+        # 檢查長度和內容
+        if 2 <= len(before_year) <= 300:
+            # 排除無效的作者名
+            invalid_patterns = [
+                r'^\d+$',  # 純數字
+                r'^[，,\.。]+$',  # 純標點
+            ]
             
-            # 檢查長度和內容
-            if 2 <= len(potential_author) <= 100:
-                # 排除無效的作者名
-                invalid_patterns = [
-                    r'^\d+$',  # 純數字
-                    r'^[，,\.。]+$',  # 純標點
-                    r'^et\s+al\.?$',  # et al.
-                ]
-                
-                is_valid = True
-                for pattern in invalid_patterns:
-                    if re.match(pattern, potential_author, re.IGNORECASE):
-                        is_valid = False
-                        break
-                
-                if is_valid and re.search(r'[a-zA-Z\u4e00-\u9fff]', potential_author):
-                    author = potential_author
-        else:
-            # 沒有逗號：可能是機構名稱或單一名稱
-            if 2 <= len(before_year) <= 100:
-                if re.search(r'[a-zA-Z\u4e00-\u9fff]', before_year):
-                    author = before_year
+            is_valid = True
+            for pattern in invalid_patterns:
+                if re.match(pattern, before_year, re.IGNORECASE):
+                    is_valid = False
+                    break
+            
+            # 直接使用整個 before_year（保留多作者）
+            if is_valid and re.search(r'[a-zA-Z\u4e00-\u9fff]', before_year):
+                author = before_year
     
-    # 步驟 3：提取標題（年份後的內容）
+    # 提取標題（年份後的內容）
     after_year = ref_text[year_match.end():].strip()
     title = None
     
@@ -631,9 +613,6 @@ def extract_apa_reference_info_fixed(ref_text):
         after_year = re.sub(r'^[\s.,，。)\]】]+', '', after_year)
         
         if after_year:
-            # 策略 1：找到第一個句號（. 或 。）
-            # 但要排除縮寫（如 Vol. No. pp.）
-            
             # 先處理特殊情況：斜體標記
             after_year = re.sub(r'</?i>', '', after_year)
             
@@ -680,8 +659,6 @@ def extract_apa_reference_info_fixed(ref_text):
         'year': year,
         'title': title
     }
-
-
 
 def extract_apalike_reference_info_fixed(ref_text):
     """修正版 APA_LIKE 格式擷取"""
