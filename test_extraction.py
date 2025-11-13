@@ -285,50 +285,6 @@ def find_apa(ref_text):
 
     return year_str.isdigit() or apa_match.group(1).lower() == "n.d."
 
-def extract_apa_reference_info_fixed(ref_text):
-    """
-    改進版：可正確擷取含月份的 APA 格式參考文獻
-    """
-    ref_text = normalize_text(ref_text)
-
-    # 🔹 完整年份 + 月份 + 日期 偵測
-    year_match = re.search(
-        r'[（(]\s*(\d{4}(?:[a-z])?|n\.d\.)\s*,?\s*(?:([A-Za-z]+\.?\s*\d{0,2}))?\s*[)）]',
-        ref_text, re.IGNORECASE
-    )
-
-    if not year_match:
-        return {'author': 'Unknown', 'year': 'Unknown', 'title': None}
-
-    year_text = year_match.group(1)
-    year = year_text[:4] if year_text.lower() != 'n.d.' else 'n.d.'
-
-    before_year = ref_text[:year_match.start()].strip()
-    author = "Unknown"
-    if before_year:
-        before_year = re.sub(r'[,\.\s(（]+$', '', before_year)
-        if 2 <= len(before_year) <= 100 and re.search(r'[a-zA-Z\u4e00-\u9fff]', before_year):
-            author = before_year
-
-    after_year = ref_text[year_match.end():].strip()
-    title = None
-    if after_year:
-        after_year = re.sub(r'^[\s.,，。)\]】]+', '', after_year)
-        end_patterns = [r'\s+In\s+', r'\s+Retrieved', r'\s+Available', r'\s+DOI', r'\s+doi:', r'\s+https?://']
-        title_end_pos = len(after_year)
-        for pattern in end_patterns:
-            match = re.search(pattern, after_year, re.IGNORECASE)
-            if match and match.start() < title_end_pos:
-                title_end_pos = match.start()
-        potential_title = after_year[:title_end_pos].strip()
-        potential_title = re.sub(r'[，,。.\s;；:：]+$', '', potential_title)
-        if len(potential_title) >= 5:
-            if not re.match(r'^(Retrieved|Available|DOI|doi|https?|www)', potential_title, re.IGNORECASE):
-                if not (potential_title.isupper() and len(potential_title) < 20):
-                    title = potential_title
-
-    return {'author': author, 'year': year, 'title': title}
-
 def find_apalike(ref_text):
     valid_years = []
     for match in re.finditer(r'[,，.。]\s*(\d{4}[a-c]?)[.。，]', ref_text):
