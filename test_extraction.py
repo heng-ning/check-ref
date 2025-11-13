@@ -487,26 +487,29 @@ def extract_ieee_reference_info_fixed(ref_text):
             title = match.group(1).strip()
             title = re.sub(r'[,，.。;；:：]*$', '', title).strip()
             
+            # 引號前的所有內容都是作者（包含多作者）
             before_title = rest_text[:match.start()].strip()
             before_title = before_title.rstrip(',，. ')
+            
+            # 移除可能的 "and" 結尾
             before_title = re.sub(r'\s+and\s*$', '', before_title, flags=re.IGNORECASE)
+            # 移除 et al. 結尾
+            before_title = re.sub(r',?\s*et\s+al\.?$', '', before_title, flags=re.IGNORECASE)
             
             if before_title:
+                # 清理開頭的編號殘留
                 before_title = re.sub(r'^\[\d+\]\s*', '', before_title)
-                before_title = re.sub(r',?\s*et\s+al\.?$', '', before_title, flags=re.IGNORECASE)
                 
-                if (re.search(r'[a-zA-Z\u4e00-\u9fff]', before_title) and len(before_title) > 1):
-                    first_author_match = re.match(r'^([^,]+)', before_title)
-                    if first_author_match:
-                        authors = first_author_match.group(1).strip()
-                    else:
-                        authors = before_title
+                # 完整保留所有作者（用逗號分隔的多作者）
+                if re.search(r'[a-zA-Z\u4e00-\u9fff]', before_title) and len(before_title) > 1:
+                    authors = before_title  # 保留完整多作者字串
             
             title_found = True
             break
     
-    # 步驟 2：如果沒有找到引號，使用備選方案
+    # 如果沒有找到引號標題，用備選方案
     if not title_found:
+        # 嘗試用 "and" 判斷作者區段結尾
         and_match = re.search(r'\band\b', rest_text, re.IGNORECASE)
         
         if and_match:
@@ -514,22 +517,25 @@ def extract_ieee_reference_info_fixed(ref_text):
             next_comma = after_and.find(',')
             
             if next_comma > 0:
+                # 從開頭到 "and" 後第一個逗號為作者
                 authors_section = rest_text[:and_match.end() + next_comma].strip()
                 authors_section = authors_section.rstrip(',，. ')
                 
-                first_author_match = re.match(r'^([^,]+)', authors_section)
-                if first_author_match:
-                    authors = first_author_match.group(1).strip()
+                # 完整保留作者區段
+                if authors_section and re.search(r'[a-zA-Z]', authors_section):
+                    authors = authors_section
                 
+                # 逗號後的內容為標題候選
                 remaining = rest_text[and_match.end() + next_comma:].strip()
                 remaining = remaining.lstrip(',，. ')
                 
                 title_match = re.match(r'^([^,，.。]+)', remaining)
                 if title_match:
                     potential_title = title_match.group(1).strip()
-                    if len(potential_title) > 10 and not re.match(r'^(vol|no|pp|in|proc|ieee|acm)', potential_title, re.IGNORECASE):
+                    if len(potential_title) > 10:
                         title = potential_title
         else:
+            # 沒有 "and"，嘗試用第一個逗號分隔
             parts = rest_text.split(',', 2)
             
             if len(parts) >= 2:
@@ -538,12 +544,10 @@ def extract_ieee_reference_info_fixed(ref_text):
                     authors = potential_author
                 
                 potential_title = parts[1].strip()
-                if (len(potential_title) > 10 and 
-                    not re.match(r'^(vol|no|pp|in|proc|ieee|acm)', potential_title, re.IGNORECASE) and
-                    not re.match(r'^[A-Z]\.\s*[A-Z]', potential_title)):
+                if len(potential_title) > 10:
                     title = potential_title
     
-    # 步驟 3：提取年份
+    # 提取年份
     year_matches = re.findall(r'\b(19\d{2}|20\d{2})\b', rest_text)
     if year_matches:
         year = year_matches[-1]
