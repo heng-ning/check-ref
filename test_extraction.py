@@ -638,7 +638,7 @@ def extract_ieee_reference_full(ref_text):
         else:
             # 沒有 "and"，嘗試用第一個逗號分隔
             parts = rest_text.split(',', 2)
-            123
+            
             if len(parts) >= 2:
                 potential_author = parts[0].strip()
                 if potential_author and re.search(r'[a-zA-Z]', potential_author):
