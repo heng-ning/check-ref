@@ -3,6 +3,8 @@ import re
 import unicodedata
 from docx import Document
 import fitz
+import json
+from datetime import datetime
 
 
 # ==================== 0. 文字正規化工具 ====================
@@ -1013,10 +1015,83 @@ def extract_reference_info(ref_paragraphs):
     
     return ref_list
 
+# ==================== 5. JSON 暫存功能 ====================
 
-# ==================== 5. Streamlit UI ====================
+def init_session_state():
+    """session_state 是 Streamlit 的記憶體暫存機制，頁面重新整理後資料不會消失"""
+
+    #儲存內文中的引用
+    if 'in_text_citations' not in st.session_state: 
+        st.session_state.in_text_citations = []
+    # 儲存參考文獻列表
+    if 'reference_list' not in st.session_state:
+        st.session_state.reference_list = []
+    # 儲存已透過 API 驗證過的正確文獻
+    if 'verified_references' not in st.session_state:
+        st.session_state.verified_references = []
+
+def save_to_session(in_text_citations, reference_list):
+    """將資料儲存到 session state"""
+    st.session_state.in_text_citations = in_text_citations
+    st.session_state.reference_list = reference_list
+
+def export_to_json():
+    """匯出為 JSON 格式: 將三個清單打包成一個 JSON 物件"""
+    data = {
+        "export_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "in_text_citations": st.session_state.in_text_citations,
+        "reference_list": st.session_state.reference_list,
+        "verified_references": st.session_state.verified_references
+    }
+
+    """範例輸出格式：
+    { 
+        "export_time": "2024-11-17 14:30:00",
+        "in_text_citations": [
+            {
+            "author": "Wang",
+            "year": "2020",
+            "original": "Wang (2020)",
+            "format": "APA"
+            }
+        ],
+        "reference_list": [
+            {
+            "author": "Wang, X.",
+            "year": "2020",
+            "title": "Deep Learning Methods",
+            "format": "APA"
+            }
+        ],
+        "verified_references": []
+    }"""
+
+    # ensure_ascii=False：保留中文字元, indent=2：格式化輸出，方便閱讀
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+def import_from_json(json_str):
+    """從 JSON 匯入資料"""
+    try:
+        data = json.loads(json_str)
+        st.session_state.in_text_citations = data.get("in_text_citations", [])
+        st.session_state.reference_list = data.get("reference_list", [])
+        st.session_state.verified_references = data.get("verified_references", [])
+        return True, "資料匯入成功！"
+    except Exception as e:
+        return False, f"匯入失敗：{str(e)}"
+
+def add_verified_reference(ref_data):
+    """新增已驗證的文獻資料"""
+    if 'verified_references' not in st.session_state:
+        st.session_state.verified_references = []
+    st.session_state.verified_references.append(ref_data)
+
+# ==================== Streamlit UI ====================
 
 st.set_page_config(page_title="文獻檢查系統", layout="wide")
+# 初始化 session state
+init_session_state()
+
 st.title("📚 學術文獻引用檢查系統")
 
 st.markdown("""
@@ -1031,9 +1106,63 @@ st.markdown("""
 
 st.markdown("---")
 
+# ==================== JSON 資料管理區 ====================
+with st.sidebar:
+    st.header("💾 資料管理")
+    
+    # 顯示當前暫存狀態
+    st.subheader("📊 當前暫存狀態")
+    st.metric("內文引用數量", len(st.session_state.in_text_citations))
+    st.metric("參考文獻數量", len(st.session_state.reference_list))
+    st.metric("已驗證文獻", len(st.session_state.verified_references))
+    
+    st.markdown("---")
+    
+    # 匯出功能
+    st.subheader("📤 匯出資料")
+    if st.button("匯出為 JSON", use_container_width=True):
+        json_data = export_to_json()
+        st.download_button(
+            label="📥 下載 JSON 檔案",
+            data=json_data,
+            file_name=f"citation_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json",
+            use_container_width=True
+        )
+    
+    # 匯入功能
+    st.subheader("📥 匯入資料")
+    uploaded_json = st.file_uploader("上傳 JSON 檔案", type=['json'])
+    if uploaded_json:
+        json_str = uploaded_json.read().decode('utf-8')
+        success, message = import_from_json(json_str)
+        if success:
+            st.session_state.json_imported = True
+            st.success(message)
+        else:
+            st.error(message)
+            
+    # 清除匯入標記（當檔案被移除時）
+    if not uploaded_json and 'json_imported' in st.session_state:
+        del st.session_state.json_imported
+    
+    # 清空資料
+    st.markdown("---")
+    st.subheader("🗑️ 清空資料")
+    if st.button("清空所有暫存", type="secondary", use_container_width=True):
+        st.session_state.in_text_citations = []
+        st.session_state.reference_list = []
+        st.session_state.verified_references = []
+        st.success("已清空所有暫存資料")
+        st.rerun() #重新載入頁面，更新側邊欄的數量顯示
+
 uploaded_file = st.file_uploader("請上傳 Word 或 PDF 檔案", type=["docx", "pdf"])
 
-if uploaded_file:
+# 如果有匯入的資料但沒有上傳檔案，顯示匯入的資料
+if not uploaded_file and (st.session_state.in_text_citations or st.session_state.reference_list):
+    st.info("📥 顯示已匯入的資料")
+
+elif uploaded_file:
     file_ext = uploaded_file.name.split(".")[-1].lower()
     
     st.subheader(f"📄 處理檔案：{uploaded_file.name}")
@@ -1059,6 +1188,25 @@ if uploaded_file:
     
     if content_paras:
         in_text_citations = extract_in_text_citations(content_paras)
+
+        # 將內文引用轉換為可序列化格式並儲存 (確保可以轉為 JSON)
+        serializable_citations = []
+        for cite in in_text_citations:
+            cite_dict = {
+                'author': cite.get('author'),
+                'co_author': cite.get('co_author'),
+                'year': cite.get('year'),
+                'ref_number': cite.get('ref_number'),
+                'original': cite.get('original'),
+                'normalized': cite.get('normalized'),
+                'position': cite.get('position'),
+                'type': cite.get('type'),
+                'format': cite.get('format')
+            }
+            serializable_citations.append(cite_dict)
+        
+        # 儲存到 session state
+        st.session_state.in_text_citations = serializable_citations
         
         col1, col2, col3 = st.columns(3)
         
@@ -1141,6 +1289,22 @@ if uploaded_file:
     if ref_paras:
         apa_refs_merged = merge_references_by_heads(ref_paras)
         ref_info = extract_reference_info(apa_refs_merged)
+
+        # 將參考文獻轉換為可序列化格式並儲存
+        serializable_refs = []
+        for ref in ref_info:
+            ref_dict = {
+                'author': ref.get('author'),
+                'year': ref.get('year'),
+                'ref_number': ref.get('ref_number'),
+                'title': ref.get('title'),
+                'format': ref.get('format'),
+                'original': ref.get('original')
+            }
+            serializable_refs.append(ref_dict)
+        
+        # 儲存到 session state
+        st.session_state.reference_list = serializable_refs
 
         # APA主鍵: 第一作者+年份
         apa_citation_pairs = set(
@@ -1416,5 +1580,17 @@ if uploaded_file:
 st.markdown("---")
 st.markdown("""
 ---
-📌 **使用提示**：上傳 PDF/Word 檔案後，系統會自動解析！
+📌 **使用提示**：
+- 上傳 PDF/Word 檔案後，系統會自動解析並暫存資料
+- 使用側邊欄的「資料管理」功能來匯出/匯入 JSON
+- JSON 資料可用於後續與外部 API 比對
 """)
+
+# ==================== 查看暫存資料 ====================
+if st.session_state.in_text_citations or st.session_state.reference_list:
+    with st.expander("🔍 查看完整暫存資料（JSON 格式）"):
+        st.json({
+            "in_text_citations": st.session_state.in_text_citations,
+            "reference_list": st.session_state.reference_list,
+            "verified_references": st.session_state.verified_references
+        })
