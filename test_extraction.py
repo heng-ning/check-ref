@@ -670,7 +670,10 @@ def extract_ieee_reference_full(ref_text):
     
     elif re.search(r'\[Online\]|Available:|https?://', after_title, re.IGNORECASE):
         result['source_type'] = 'Website/Online'
-    
+
+    elif re.search(r'\[Online\]|Available:|https?://|arxiv\.org', after_title, re.IGNORECASE):
+        result['source_type'] = 'Website/Online'
+
     elif re.search(r'(Ph\.D\.|M\.S\.|thesis|dissertation)', after_title, re.IGNORECASE):
         result['source_type'] = 'Thesis/Dissertation'
     
@@ -684,64 +687,97 @@ def extract_ieee_reference_full(ref_text):
         result['source_type'] = 'Book'
     
     # === 3. 提取通用欄位 ===
-    
+
     # 卷號
     vol_match = re.search(r'vol\.\s*(\d+)', after_title, re.IGNORECASE)
     if vol_match:
         result['volume'] = vol_match.group(1)
-    
+
     # 期號
     issue_match = re.search(r'no\.\s*(\d+)', after_title, re.IGNORECASE)
     if issue_match:
         result['issue'] = issue_match.group(1)
-    
-    # 頁碼
-    pages_match = re.search(r'pp\.\s*([\d\-–]+)', after_title, re.IGNORECASE)
+
+    # 頁碼（改進：更精確的匹配，避免抓到授權資訊中的數字）
+    pages_match = re.search(r'pp\.\s*([\d]+\s*[–\-—]\s*[\d]+)', after_title, re.IGNORECASE)
     if pages_match:
-        result['pages'] = pages_match.group(1)
-    
+        # 清理頁碼中的空格
+        pages = pages_match.group(1)
+        pages = re.sub(r'\s+', '', pages)  # 移除空格
+        pages = pages.replace('–', '-').replace('—', '-')  # 統一連字符
+        result['pages'] = pages
+
     # 年份
     year_matches = re.findall(r'\b(19\d{2}|20\d{2})\b', after_title)
     if year_matches:
-        result['year'] = year_matches[-1]
-    
+        result['year'] = year_matches[0]  # 取第一個年份（避免抓到下載日期）
+
     # 月份
     month_match = re.search(r'\b(Jan\.|Feb\.|Mar\.|Apr\.|May|Jun\.|Jul\.|Aug\.|Sep\.|Oct\.|Nov\.|Dec\.)\b', 
-                           after_title, re.IGNORECASE)
+                        after_title, re.IGNORECASE)
     if month_match:
         result['month'] = month_match.group(1)
-    
-    # URL
-    url_match = re.search(r'(https?://[^\s,]+)', after_title)
+
+    # URL（改進：支援 arXiv、GitHub 等各種 URL，含空格處理）
+    url = None
+
+    # 1. 優先直接抓 Available: / Retrieved from 後的網址，全長且允許空白
+    url_match = re.search(r'(?:Available:|Retrieved from)\s*(https?://[^\s,]+(?:\s+[^\s,]+)*)', after_title, re.IGNORECASE)
     if url_match:
-        result['url'] = url_match.group(1)
-    
-    # 存取日期
-    access_match = re.search(r'accessed\s+([A-Za-z]+\.?\s+\d{1,2},?\s+\d{4})', after_title, re.IGNORECASE)
+        # 合併所有換行與空白使其為一行
+        url = url_match.group(1).strip().replace(' ', '')
+
+    # 2. 如果沒抓到，再抓所有 http 開頭到遇到空白/逗號/句號/結尾
+    if not url:
+        generic_url_match = re.search(r'(https?://[^\s,.;]+)', after_title)
+        if generic_url_match:
+            url = generic_url_match.group(1).strip()
+
+    # 3. 最後寫入 result
+    if url:
+        result['url'] = url
+
+    # 存取日期（改進：更精確匹配）
+    access_match = re.search(
+        r'(?:accessed|retrieved|downloaded)\s+(?:on\s+)?([A-Za-z]+\.?\s+\d{1,2},?\s*\d{4})', 
+        after_title, 
+        re.IGNORECASE
+    )
     if access_match:
         result['access_date'] = access_match.group(1)
-    
-    # DOI
-    doi_match = re.search(r'doi:\s*([\d\.]+/[\S]+)', after_title, re.IGNORECASE)
-    if doi_match:
-        result['doi'] = doi_match.group(1)
-    
+
+    # DOI（新增：支援多種 DOI 格式）
+    doi_patterns = [
+        r'doi:\s*(10\.\d{4,}/[^\s,]+)',  # 標準格式：doi: 10.xxxx/xxxxx
+        r'https?://(?:dx\.)?doi\.org/(10\.\d{4,}/[^\s,]+)',  # URL 格式：https://doi.org/10.xxxx/xxxxx
+        r'DOI:\s*(10\.\d{4,}/[^\s,]+)',  # 大寫 DOI
+    ]
+
+    for pattern in doi_patterns:
+        doi_match = re.search(pattern, after_title, re.IGNORECASE)
+        if doi_match:
+            result['doi'] = doi_match.group(1).rstrip('.,;')
+            break
+
     # 出版社與地點
-    publisher_match = re.search(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s+([A-Z]{2,}(?:,\s+[A-Z]{2,})?)\s*:\s*([^,]+)', after_title)
+    publisher_match = re.search(
+        r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s+([A-Z]{2,}(?:,\s+[A-Z]{2,})?)\s*:\s*([^,]+)', 
+        after_title
+    )
     if publisher_match:
         result['location'] = publisher_match.group(1) + ', ' + publisher_match.group(2)
         result['publisher'] = publisher_match.group(3)
-    
+
     # 版本
     edition_match = re.search(r'(\d+(?:st|nd|rd|th)\s+ed\.)', after_title, re.IGNORECASE)
     if edition_match:
         result['edition'] = edition_match.group(1)
-    
+
     # 報告編號
-    report_match = re.search(r'(Tech\. Rep\.|Rep\.)\s+([\w\-]+)', after_title, re.IGNORECASE)
+    report_match = re.search(r'(Tech\.\s+Rep\.|Rep\.)\s+([\w\-]+)', after_title, re.IGNORECASE)
     if report_match:
         result['report_number'] = report_match.group(2)
-    
+
     # 專利號
     patent_match = re.search(r'(U\.S\.|US)\s+Patent\s+([\d,]+)', after_title, re.IGNORECASE)
     if patent_match:
