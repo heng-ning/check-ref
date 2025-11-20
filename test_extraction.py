@@ -1062,28 +1062,6 @@ def export_to_json():
         "verified_references": st.session_state.verified_references
     }
 
-    """範例輸出格式：
-    { 
-        "export_time": "2024-11-17 14:30:00",
-        "in_text_citations": [
-            {
-            "author": "Wang",
-            "year": "2020",
-            "original": "Wang (2020)",
-            "format": "APA"
-            }
-        ],
-        "reference_list": [
-            {
-            "author": "Wang, X.",
-            "year": "2020",
-            "title": "Deep Learning Methods",
-            "format": "APA"
-            }
-        ],
-        "verified_references": []
-    }"""
-
     # ensure_ascii=False：保留中文字元, indent=2：格式化輸出，方便閱讀
     return json.dumps(data, ensure_ascii=False, indent=2)
 
@@ -1314,6 +1292,7 @@ elif uploaded_file:
             ref_dict = {
                 'author': ref.get('author'),
                 'year': ref.get('year'),
+                'date': ref.get('date'),
                 'ref_number': ref.get('ref_number'),
                 'title': ref.get('title'),
                 'format': ref.get('format'),
