@@ -1567,7 +1567,7 @@ elif uploaded_file:
         # ============ APA 和其他格式 ============
         st.markdown("### 📚 APA 與其他格式參考文獻")
         
-        with st.expander("📋 查看 APA / APA_LIKE / 未知格式"):
+        with st.expander("📋 查看 APA / APA_LIKE / 未知格式完整資訊"):
             for i, ref in enumerate(ref_info, 1):
                 if ref['format'] == 'APA':
                     title_display = ref['title'] if ref['title'] else "❌ 無法擷取"
@@ -1576,13 +1576,37 @@ elif uploaded_file:
                     st.markdown(f"**📄 標題**：{title_display}")
                     st.markdown(f"**📅 年份**：{ref['year']}")
                     if ref.get('date'):
-                        st.markdown(f"**🗓️ 時間**：{ref['date']}")  
-
+                        st.markdown(f"**🗓️ 時間**：{ref['date']}")
+                    
                     st.text_area(
                         label="原文",
                         value=ref['original'],
                         height=80,
-                        key=f"ref_original_apa_{i}",
+                        key=f"ref_original_apa_{len(st.session_state.reference_list)}_{i}",
+                        disabled=True
+                    )
+                    st.markdown("---")
+                        
+                elif ref['format'] == 'APA_LIKE':
+                    st.markdown(f"### {i}. [APA_LIKE]")
+                    st.markdown(f"**📅 年份**：{ref['year']}")
+                    st.text_area(
+                        label="原文",
+                        value=ref['original'],
+                        height=80,
+                        key=f"ref_original_apalike_{len(st.session_state.reference_list)}_{i}",
+                        disabled=True
+                    )
+                    st.markdown("---")
+                        
+                elif ref['format'] == 'Unknown':
+                    st.markdown(f"### {i}. [未知格式]")
+                    st.markdown("**⚠️ 無法解析格式**")
+                    st.text_area(
+                        label="原文",
+                        value=ref['original'],
+                        height=80,
+                        key=f"ref_original_unknown_{len(st.session_state.reference_list)}_{i}",
                         disabled=True
                     )
                     st.markdown("---")
