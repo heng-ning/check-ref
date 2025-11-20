@@ -789,21 +789,29 @@ def extract_ieee_reference_full(ref_text):
 
 def extract_apa_reference_info_fixed(ref_text):
     """
-    APA 格式擷取（修正多作者問題）
+    APA 格式擷取（修正多作者問題 + 支援完整日期 + 改進標題擷取）
     """
     
-    # 找年份（必須有括號）
-    year_match = re.search(r'[（(]\s*(\d{4}[a-z]?|n\.d\.)\s*[）)]', ref_text, re.IGNORECASE)
+    # 找年份（必須有括號,支援完整日期格式）
+    year_match = re.search(
+        r'[（(]\s*(\d{4}[a-z]?|n\.d\.)\s*(?:,\s*([A-Za-z]+\.?\s*\d{0,2}))?\s*[）)]',
+        ref_text, 
+        re.IGNORECASE
+    )
     
     if not year_match:
         return {
             'author': 'Unknown',
             'year': 'Unknown',
+            'date': None,
             'title': None
         }
     
     year_text = year_match.group(1)
     year = year_text[:4] if year_text.lower() != 'n.d.' else 'n.d.'
+    
+    # 提取完整日期（如果有月份日期）
+    date_str = year_match.group(2) if year_match.group(2) else None
     
     # 提取作者（年份前的內容）
     before_year = ref_text[:year_match.start()].strip()
@@ -843,47 +851,52 @@ def extract_apa_reference_info_fixed(ref_text):
             # 先處理特殊情況：斜體標記
             after_year = re.sub(r'</?i>', '', after_year)
             
-            # 找所有句號的位置
-            sentences = []
-            current_pos = 0
+            # 1. 先找是否有明確的標題結束標記
+            title_end_markers = [
+                r'Retrieved from',
+                r'Available from',
+                r'Available at',
+                r'\[Electronic version\]',
+                r'DOI:',
+                r'doi:',
+                r'https?://',
+            ]
             
-            while current_pos < len(after_year):
-                # 找下一個句號
-                next_period = -1
-                for delimiter in ['.', '。']:
-                    pos = after_year.find(delimiter, current_pos)
-                    if pos != -1 and (next_period == -1 or pos < next_period):
-                        next_period = pos
-                
-                if next_period == -1:
-                    # 沒有找到句號，取剩餘全部
-                    sentences.append(after_year[current_pos:].strip())
-                    break
-                else:
-                    # 找到句號
-                    segment = after_year[current_pos:next_period].strip()
-                    
-                    # 檢查是否為縮寫（Vol. No. pp. etc.）
-                    if segment and not re.match(r'^(Vol|No|pp|P|p|Ed|Eds?|Rev|Vol|v|ed|eds?|rev)\s*$', segment, re.IGNORECASE):
-                        sentences.append(segment)
-                        break
-                    else:
-                        current_pos = next_period + 1
+            title_end_pos = len(after_year)
+            for marker in title_end_markers:
+                match = re.search(marker, after_year, re.IGNORECASE)
+                if match and match.start() < title_end_pos:
+                    title_end_pos = match.start()
             
-            if sentences and sentences[0]:
-                potential_title = sentences[0].strip()
-                
-                # 驗證標題
-                if len(potential_title) >= 5:
-                    # 排除一些不可能是標題的內容
-                    if not re.match(r'^(Retrieved|Available|DOI|doi|https?|www)', potential_title, re.IGNORECASE):
-                        # 排除全大寫且很短的內容（可能是期刊縮寫）
-                        if not (potential_title.isupper() and len(potential_title) < 20):
-                            title = potential_title
+            # 取標題結束標記前的內容
+            title_candidate = after_year[:title_end_pos].strip()
+            
+            # 2. 清理標題末尾
+            # 移除末尾的期刊資訊標記
+            title_candidate = re.sub(
+                r'\s*[\.,]\s*$',
+                '',
+                title_candidate
+            )
+            
+            # 移除可能的期刊名稱（斜體標記後的內容）
+            # 例如: "Title. Journal Name" -> "Title"
+            if '.' in title_candidate:
+                parts = title_candidate.split('.')
+                # 如果第一部分夠長,就用第一部分
+                if len(parts[0].strip()) >= 10:
+                    title_candidate = parts[0].strip()
+            
+            # 3. 驗證標題
+            if len(title_candidate) >= 5:
+                if not re.match(r'^(Retrieved|Available|DOI|doi|https?|www)', title_candidate, re.IGNORECASE):
+                    if not (title_candidate.isupper() and len(title_candidate) < 20):
+                        title = title_candidate
     
     return {
         'author': author,
         'year': year,
+        'date': date_str,
         'title': title
     }
 
@@ -1002,6 +1015,7 @@ def extract_reference_info(ref_paragraphs):
                 ref_list.append({
                     'author': ieee_info['authors'],
                     'year': ieee_info['year'],
+                    'date': None,
                     'ref_number': ieee_info['ref_number'],
                     'title': ieee_info['title'],
                     'format': 'IEEE',
@@ -1011,6 +1025,7 @@ def extract_reference_info(ref_paragraphs):
                 ref_list.append({
                     'author': 'Parse Error',
                     'year': 'Unknown',
+                    'date': None,
                     'ref_number': 'Unknown',
                     'title': None,
                     'format': 'IEEE',
@@ -1022,6 +1037,7 @@ def extract_reference_info(ref_paragraphs):
             ref_list.append({
                 'author': apa_info['author'],
                 'year': apa_info['year'],
+                'date': apa_info.get('date'), 
                 'ref_number': None,
                 'title': apa_info['title'],
                 'format': 'APA',
@@ -1033,6 +1049,7 @@ def extract_reference_info(ref_paragraphs):
             ref_list.append({
                 'author': apalike_info['author'],
                 'year': apalike_info['year'],
+                'date': None,
                 'ref_number': None,
                 'title': apalike_info['title'],
                 'format': 'APA_LIKE',
@@ -1043,6 +1060,7 @@ def extract_reference_info(ref_paragraphs):
             ref_list.append({
                 'author': 'Unknown Format',
                 'year': 'Unknown',
+                'date': None,
                 'ref_number': None,
                 'title': None,
                 'format': 'Unknown',
@@ -1079,28 +1097,6 @@ def export_to_json():
         "reference_list": st.session_state.reference_list,
         "verified_references": st.session_state.verified_references
     }
-
-    """範例輸出格式：
-    { 
-        "export_time": "2024-11-17 14:30:00",
-        "in_text_citations": [
-            {
-            "author": "Wang",
-            "year": "2020",
-            "original": "Wang (2020)",
-            "format": "APA"
-            }
-        ],
-        "reference_list": [
-            {
-            "author": "Wang, X.",
-            "year": "2020",
-            "title": "Deep Learning Methods",
-            "format": "APA"
-            }
-        ],
-        "verified_references": []
-    }"""
 
     # ensure_ascii=False：保留中文字元, indent=2：格式化輸出，方便閱讀
     return json.dumps(data, ensure_ascii=False, indent=2)
@@ -1332,6 +1328,7 @@ elif uploaded_file:
             ref_dict = {
                 'author': ref.get('author'),
                 'year': ref.get('year'),
+                'date': ref.get('date'),
                 'ref_number': ref.get('ref_number'),
                 'title': ref.get('title'),
                 'format': ref.get('format'),
@@ -1578,6 +1575,9 @@ elif uploaded_file:
                     st.markdown(f"**📝 作者**：{ref['author']}")
                     st.markdown(f"**📄 標題**：{title_display}")
                     st.markdown(f"**📅 年份**：{ref['year']}")
+                    if ref.get('date'):
+                        st.markdown(f"**🗓️ 時間**：{ref['date']}")  
+
                     st.text_area(
                         label="原文",
                         value=ref['original'],
