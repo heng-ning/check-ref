@@ -2030,6 +2030,10 @@ elif uploaded_file:
                                 
                             st.markdown(f"**👥 作者**")
                             st.markdown(f"　└─ {author_display}")
+
+                        if ref.get('title'):
+                            st.markdown(f"**📝 標題**")
+                            st.markdown(f"　└─ {ref['title']}")
                         
                         if ref.get('source'):
                             st.markdown(f"**📖 來源**")
