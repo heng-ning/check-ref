@@ -183,7 +183,7 @@ def classify_document_sections(paragraphs):
 def is_valid_year(year_str):
     try:
         year = int(year_str)
-        return 1000 <= year <= 2050
+        return 1500 <= year <= 2050
     except:
         return False
 
@@ -1403,60 +1403,385 @@ def parse_ieee_authors(author_str):
             authors.append({'last': seg, 'first': ''})
     return authors
 
-def extract_ieee_en_detailed(ref_text):
-    """[Updated from test1204-6] 英文 IEEE 詳細解析 (增強年份抓取)"""
-    result = {
-        'format': 'IEEE (EN)', 'lang': 'EN',
-        'ref_number': None, 'authors': "Unknown", 'parsed_authors': [],
-        'title': None, 'source': None,
-        'volume': None, 'issue': None, 'pages': None, 'year': None,
-        'doi': None, 'original': ref_text
-    }
-    num_match = re.match(r'^\s*[\[【]\s*(\d+)\s*[\]】]', ref_text)
-    if num_match:
-        result['ref_number'] = num_match.group(1)
-        rest_text = ref_text[num_match.end():].strip()
-    else:
-        rest_text = ref_text
+# def extract_ieee_en_detailed(ref_text):
+#     """[Updated] 修正版 IEEE 詳細解析 (解決會議名稱包含年份被誤切的問題)"""
+#     result = {
+#         'format': 'IEEE (EN)', 'lang': 'EN',
+#         'ref_number': None, 'authors': "Unknown", 'parsed_authors': [],
+#         'title': None, 'source': None,
+#         'volume': None, 'issue': None, 'pages': None, 'year': None,
+#         'doi': None, 'original': ref_text
+#     }
+    
+#     # 1. 提取編號
+#     num_match = re.match(r'^\s*[\[【]\s*(\d+)\s*[\]】]', ref_text)
+#     if num_match:
+#         result['ref_number'] = num_match.group(1)
+#         rest_text = ref_text[num_match.end():].strip()
+#     else:
+#         rest_text = ref_text
 
-    result['doi'] = extract_doi(rest_text)
+#     # 2. 提取基本資訊
+#     result['doi'] = extract_doi(rest_text)
     
-    # [Updated] 找最後出現的年份 (IEEE 年份通常在後面)
-    year_match = re.findall(r'\b(19\d{2}|20\d{2})\b', rest_text)
-    if year_match: result['year'] = year_match[-1]
+#     # 找年份 (IEEE 年份通常在後面)
+#     year_match = re.findall(r'\b(19\d{2}|20\d{2})\b', rest_text)
+#     if year_match: result['year'] = year_match[-1]
     
-    vol_match = re.search(r'vol\.\s*(\d+)', rest_text, re.IGNORECASE)
+#     # 提取 Vol, No, Pages
+#     vol_match = re.search(r'vol\.\s*(\d+)', rest_text, re.IGNORECASE)
+#     if vol_match: result['volume'] = vol_match.group(1)
+    
+#     no_match = re.search(r'no\.\s*(\d+)', rest_text, re.IGNORECASE)
+#     if no_match: result['issue'] = no_match.group(1)
+    
+#     pp_match = re.search(r'pp\.\s*([\d\–\-]+)', rest_text, re.IGNORECASE)
+#     if pp_match: result['pages'] = pp_match.group(1)
+
+#     # 3. 提取標題與來源 (最關鍵的部分)
+#     quote_match = re.search(r'["“](.+?)["”]', rest_text)
+    
+#     if quote_match:
+#         # 標題
+#         result['title'] = quote_match.group(1).strip().rstrip(',.')
+        
+#         # 作者
+#         before_quote = rest_text[:quote_match.start()].strip().rstrip(',. ')
+#         if before_quote:
+#             result['authors'] = before_quote
+#             # 使用您原本的 parse_ieee_authors 函式
+#             if 'parse_ieee_authors' in globals():
+#                 result['parsed_authors'] = parse_ieee_authors(before_quote)
+            
+#         # 來源 (標題之後的部分)
+#         after_quote = rest_text[quote_match.end():].strip()
+        
+#         # [修正重點] 來源清理邏輯
+#         end_indicators = [r'vol\.', r'no\.', r'pp\.', r'\b19\d{2}\b', r'\b20\d{2}\b']
+#         min_pos = len(after_quote)
+        
+#         for ind in end_indicators:
+#             # 搜尋截斷標記
+#             matches = list(re.finditer(ind, after_quote, re.IGNORECASE))
+#             for m in matches:
+#                 # 特殊處理年份：如果年份出現在開頭 (例如 "in 2019 IEEE...")，忽略它，不要切斷！
+#                 # "in " 大約佔 3 個字元，所以我們寬鬆地設定為 < 5
+#                 if (r'19\d{2}' in ind or r'20\d{2}' in ind) and m.start() < 5:
+#                     continue
+                
+#                 if m.start() < min_pos:
+#                     min_pos = m.start()
+#                     # 找到最早的有效截斷點後，就不需要再看後面的 match 了
+#                     break 
+        
+#         source_candidate = after_quote[:min_pos].strip().strip(',. ')
+#         # 移除開頭的 "in "
+#         result['source'] = re.sub(r'^in\s+', '', source_candidate, flags=re.IGNORECASE)
+        
+#     else:
+#         # Fallback
+#         parts = rest_text.split(',', 1)
+#         if len(parts) > 1:
+#             result['authors'] = parts[0].strip()
+#             result['title'] = parts[1].strip()
+
+#     return result
+
+def extract_ieee_reference_full(ref_text):
+    """
+    [Final Combined Version] 完整解析 IEEE 格式參考文獻
+    結合了詳細欄位提取 (URL, DOI, SourceType) 與 來源截斷修復邏輯。
+    """
+    
+    # 基本欄位初始化
+    result = {
+        'format': 'IEEE',
+        'ref_number': None,
+        'source_type': 'Unknown',
+        'authors': None,
+        'parsed_authors': [],
+        'title': None,
+        'source': None, # 統稱：期刊名/會議名
+        'journal_name': None,
+        'conference_name': None,
+        'volume': None,
+        'issue': None,
+        'pages': None,
+        'year': None,
+        'month': None,
+        'publisher': None,
+        'location': None,
+        'edition': None,
+        'url': None,
+        'access_date': None,
+        'doi': None,
+        'report_number': None,
+        'patent_number': None,
+        'original': ref_text
+    }
+    
+    # 1. 提取編號 [1]
+    number_match = re.match(r'^\s*[\[【]\s*(\d+)\s*[\]】]\s*', ref_text)
+    if not number_match:
+        return result # 非標準 IEEE，直接回傳
+    
+    result['ref_number'] = number_match.group(1)
+    rest_text = ref_text[number_match.end():].strip()
+    
+    # === 2. 提取作者和標題（使用多種引號支援） ===
+    quote_patterns = [
+        (r'"', r'"'), (r'“', r'”'), (r'“', r'“'),  (r'”', r'”'),(r'\'', r'\''), (r'「', r'」')
+    ]
+    
+    title_found = False
+    after_title = rest_text # 預設為剩下的全部
+    
+    for open_q, close_q in quote_patterns:
+        pattern = re.escape(open_q) + r'(.+?)' + re.escape(close_q)
+        match = re.search(pattern, rest_text)
+        
+        if match:
+            # 抓到標題
+            title = match.group(1).strip().rstrip(',.。;；:：')
+            result['title'] = title
+            
+            # 抓到作者 (標題前的部分)
+            before_title = rest_text[:match.start()].strip().rstrip(',. ')
+            # 清理結尾的 and 或 et al.
+            before_title = re.sub(r'\s+and\s*$', '', before_title, flags=re.IGNORECASE)
+            before_title = re.sub(r',?\s*et\s+al\.?$', '', before_title, flags=re.IGNORECASE)
+            
+            if before_title:
+                result['authors'] = before_title
+                # 如果有 parse_ieee_authors 函式就呼叫
+                if 'parse_ieee_authors' in globals():
+                    result['parsed_authors'] = parse_ieee_authors(before_title)
+            
+            after_title = rest_text[match.end():].strip()
+            title_found = True
+            break
+            
+
+        # Fallback: 如果沒找到引號，啟動智慧救援模式
+        if not title_found:
+        # 策略 1: 嘗試尋找 "年份." 或 "年份+字母."
+            year_split_match = re.search(r'(?:,|^)\s*(\d{4}[a-z]?)\.\s+', rest_text)
+        
+        if year_split_match:
+            split_index = year_split_match.start()
+            end_index = year_split_match.end()
+            
+            result['authors'] = rest_text[:split_index].strip().strip(',. ')
+            result['year'] = year_split_match.group(1)
+            
+            title_candidate = rest_text[end_index:].strip()
+            
+            # [修正] 分割標題與來源的優先順序
+            # 1. 先找 "In:" 或 "in:"
+            in_split_match = re.search(r'(?:\.|,|\s)\s*(?:In|in):\s*', title_candidate)
+            
+            if in_split_match:
+                result['title'] = title_candidate[:in_split_match.start()].strip().rstrip('.')
+                after_title = title_candidate[in_split_match.end():].strip()
+            else:
+                # 2. 沒找到 "In:"，嘗試用第一個 "句號+空格" (. ) 來分割
+                # 這適用於 "Title. Source." 這種格式
+                # 但要小心縮寫 (如 "Proc.")，所以限制句號後面的單字長度或特徵比較安全，這裡先簡單處理
+                dot_split_match = re.search(r'\.\s+', title_candidate)
+                if dot_split_match:
+                    result['title'] = title_candidate[:dot_split_match.start()].strip()
+                    after_title = title_candidate[dot_split_match.end():].strip()
+                else:
+                    result['title'] = title_candidate
+                    after_title = result['title'] 
+                
+        else:
+            # 策略 2: 沒年份，用逗號切分
+            parts = rest_text.split(',', 1)
+            if len(parts) > 1:
+                result['authors'] = parts[0].strip()
+                result['title'] = parts[1].strip()
+                after_title = result['title']
+            # === [修正] 特殊情況處理：作者與標題混在引號內 ===
+            # 例如: [2] "Ethereum foundation. The solidity..."
+            # 如果抓不到作者，但標題內有句號，嘗試從標題提取作者
+        if not result.get('authors') and result.get('title'):
+            # 尋找 "點號+空格" (例如 "Foundation. The")，且後面接大寫字母
+            author_split = re.search(r'\.\s+([A-Z])', result['title'])
+            if author_split:
+                # 句號前是作者
+                result['authors'] = result['title'][:author_split.start()].strip()
+                # 句號後是真正標題 (包含匹配到的那個大寫字母)
+                result['title'] = result['title'][author_split.start() + 1:].strip()
+    # === 3. 提取來源資訊 (Vol, No, pp, Year, Source Name) ===
+    # 使用 [修正版] 的邏輯來處理 after_title，避免會議名稱被截斷
+    
+    # 先抓欄位
+    vol_match = re.search(r'\bvol\.?\s*(\d+)', after_title, re.IGNORECASE)
     if vol_match: result['volume'] = vol_match.group(1)
     
-    no_match = re.search(r'no\.\s*(\d+)', rest_text, re.IGNORECASE)
+    no_match = re.search(r'\bno\.?\s*(\d+)', after_title, re.IGNORECASE)
     if no_match: result['issue'] = no_match.group(1)
     
-    pp_match = re.search(r'pp\.\s*([\d\–\-]+)', rest_text, re.IGNORECASE)
-    if pp_match: result['pages'] = pp_match.group(1)
+    # 改進的頁碼匹配 (支援 "123-456", "123 - 456", "123- 456" 等格式)
+    pp_match = re.search(r'\b(?:pp?\.?)\s*(\d+(?:\s*[\–\-—]\s*\d+)?)', after_title, re.IGNORECASE)
+    
+    if pp_match: 
+        # 抓到後，先移除所有空格，再統一連字符
+        raw_pages = pp_match.group(1)
+        clean_pages = re.sub(r'\s+', '', raw_pages) # 移除 " - " 中間的空格
+        result['pages'] = clean_pages.replace('–', '-').replace('—', '-')
 
-    quote_match = re.search(r'["“](.+?)["”]', rest_text)
-    if quote_match:
-        result['title'] = quote_match.group(1).strip().rstrip(',.')
-        before_quote = rest_text[:quote_match.start()].strip().rstrip(',. ')
-        if before_quote:
-            result['authors'] = before_quote
-            result['parsed_authors'] = parse_ieee_authors(before_quote)
-            
-        after_quote = rest_text[quote_match.end():].strip()
-        # [Updated] 更精確的來源清理
-        end_indicators = [r'vol\.', r'no\.', r'pp\.', r'\b19\d{2}\b', r'\b20\d{2}\b']
-        min_pos = len(after_quote)
-        for ind in end_indicators:
-            m = re.search(ind, after_quote, re.IGNORECASE)
-            if m and m.start() < min_pos: min_pos = m.start()
-        
-        source_candidate = after_quote[:min_pos].strip().strip(',. ')
-        result['source'] = re.sub(r'^in\s+', '', source_candidate, flags=re.IGNORECASE)
+
+    # 年份 (找最後出現的 4 碼)
+    year_search_text = re.sub(r'(?:Downloaded|Accessed|Retrieved)\s+on.*', '', after_title, flags=re.IGNORECASE)
+    
+    # 找剩餘文字中最後出現的 4 碼年份
+    # 找剩餘文字中最後出現的 4 碼年份
+    # [修正] 加入 (?<!:) 以排除 arXiv 編號 (如 arXiv:1903)
+    year_matches = re.findall(r'(?<!:)\b(19\d{2}|20\d{2})\b', year_search_text)
+    
+    if year_matches: 
+        result['year'] = year_matches[-1]
     else:
-        parts = rest_text.split(',', 1)
-        if len(parts) > 1:
-            result['authors'] = parts[0].strip()
-            result['title'] = parts[1].strip()
+        # 如果移除後找不到，再嘗試從原本的找 (Fallback)
+        # 這裡也建議加上 (?<!:) 以防萬一
+        all_years = re.findall(r'(?<!:)\b(19\d{2}|20\d{2})\b', after_title)
+        if all_years: result['year'] = all_years[0] # 取第一個比較保險
+
+    # [重點修正] 提取來源名稱 (Source Name)
+    # 建立截斷點清單
+    months_regex = r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?'
+    end_indicators = [
+        r'\bvol\.?\s*\d+', 
+        r'\bno\.?\s*\d+', 
+        r'\b(?:pp?\.?)\s*[\d\–\-]+', 
+        # [修正] 排除前面有冒號的年份 (避免 arXiv:1903 被誤判)
+        r'(?<!:)\b19\d{2}\b', 
+        r'(?<!:)\b20\d{2}\b', 
+        r'doi:',
+        months_regex
+    ]
+    min_pos = len(after_title)
+    
+    for ind in end_indicators:
+        matches = list(re.finditer(ind, after_title, re.IGNORECASE))
+        for m in matches:
+            # 邏輯 1: 年份開頭保護機制
+            if (r'19\d{2}' in ind or r'20\d{2}' in ind):
+                # 只有當年份在開頭 (index < 5) 且後面還有"實質內容"時，才保護它
+                # 實質內容定義：年份後面有英文字母 (代表可能是會議名)
+                context_after = after_title[m.end():]
+                has_text_after = re.search(r'[a-zA-Z]', context_after)
+                
+                if m.start() < 5 and has_text_after:
+                    continue # 這是 "2008 IEEE..." 的情況，保護它，不切斷
+                
+                # 邏輯 2: 會議關鍵字保護 (保留之前的修正)
+                # 如果年份後面緊接會議關鍵字，忽略它
+                full_context_after = after_title[m.end():m.end()+50]
+                if re.search(r'\b(Conference|Symposium|Workshop|Congress|Meeting)\b', full_context_after, re.IGNORECASE):
+                    continue
+
+            if m.start() < min_pos:
+                min_pos = m.start()
+                break # 找到最早的截斷點就跳出內層
+    
+    source_candidate = after_title[:min_pos].strip().strip(',. ')
+    
+    # 移除開頭的 "in "
+    clean_source = re.sub(r'^in\s+', '', source_candidate, flags=re.IGNORECASE)
+    
+    # [新增] 移除結尾的 "Retrieved from" 或網址殘留 (解決圖一問題)
+    clean_source = re.sub(r'(?:Retrieved from|Available:|http).*', '', clean_source, flags=re.IGNORECASE).strip().strip(',. ')
+    
+    result['source'] = clean_source
+
+    # === 4. 判斷 Source Type 並細分 ===
+    # 根據提取出的 source 或關鍵字判斷類型
+    
+    full_search_text = after_title # 用完整的後半段來判斷類型比較準
+    
+    if re.search(r'(Proc\.|Proceedings|Conference|Symposium|Workshop|Conf\.)', full_search_text, re.IGNORECASE):
+        result['source_type'] = 'Conference Paper'
+        result['conference_name'] = clean_source # 通常 source 就是會議名
+        
+    elif re.search(r'(vol\.|volume|no\.|number)', full_search_text, re.IGNORECASE) and not result['conference_name']:
+        result['source_type'] = 'Journal Article'
+        result['journal_name'] = clean_source
+        
+    elif re.search(r'(Ph\.D\.|M\.S\.|thesis|dissertation)', full_search_text, re.IGNORECASE):
+        result['source_type'] = 'Thesis/Dissertation'
+        
+    elif re.search(r'(Tech\. Rep\.|Technical Report)', full_search_text, re.IGNORECASE):
+        result['source_type'] = 'Technical Report'
+        # 嘗試提取報告編號
+        rep_match = re.search(r'(Tech\.\s+Rep\.|Rep\.)\s+([\w\-]+)', full_search_text, re.IGNORECASE)
+        if rep_match: result['report_number'] = rep_match.group(2)
+        
+    elif re.search(r'Patent', full_search_text, re.IGNORECASE):
+        result['source_type'] = 'Patent'
+        pat_match = re.search(r'(U\.S\.|US)\s+Patent\s+([\d,]+)', full_search_text, re.IGNORECASE)
+        if pat_match: result['patent_number'] = pat_match.group(2)
+        
+    elif re.search(r'\[Online\]|Available:|https?://|arxiv\.org', full_search_text, re.IGNORECASE):
+        result['source_type'] = 'Website/Online'
+    
+    elif re.search(r'(Ed\.|Eds\.|edition)', full_search_text, re.IGNORECASE):
+        result['source_type'] = 'Book'
+        # 提取版本
+        ed_match = re.search(r'(\d+(?:st|nd|rd|th)\s+ed\.)', full_search_text, re.IGNORECASE)
+        if ed_match: result['edition'] = ed_match.group(1)
+
+    # === 5. 提取其他詳細欄位 ===
+    
+    # 月份 (移動到這裡確保能抓到)
+    # 支援縮寫 (Sep.) 與全稱 (September)，且不分大小寫
+    strict_months_regex = r'\b(?:Jan\.|Jan|January|Feb\.|Feb|February|Mar\.|Mar|March|Apr\.|Apr|April|May\.?|May|Jun\.|Jun|June|Jul\.|Jul|July|Aug\.|Aug|August|Sep\.|Sep|Sept\.|September|Oct\.|Oct|October|Nov\.|Nov|November|Dec\.|Dec|December)\b'
+    
+    month_match = re.search(strict_months_regex, full_search_text, re.IGNORECASE)
+    
+    if month_match: 
+        result['month'] = month_match.group(0)
+    
+    # DOI
+    doi_match = re.search(r'(?:doi:|DOI:|https?://doi\.org/)\s*(10\.\d{4,}/[^\s,;]+)', full_search_text)
+    if doi_match: result['doi'] = doi_match.group(1).rstrip('.')
+    
+    # URL (優先抓 Available: 後面的)
+    url_match = re.search(r'(?:Available:|Retrieved from)\s*(https?://[^,\n]+)', full_search_text, re.IGNORECASE)
+    if url_match:
+        raw_url = url_match.group(1)
+        # [修正] 強制移除所有空格
+        result['url'] = raw_url.replace(' ', '').strip()
+        
+    elif not result['url']:
+        # Fallback: 抓取任何 http 開頭
+        gen_url = re.search(r'(https?://[^\s,;]+(?:\.pdf)?)', full_search_text, re.IGNORECASE)
+        if gen_url: 
+            # 同樣移除空格
+            result['url'] = gen_url.group(1).replace(' ', '').strip()
+        
+    # Access Date
+    acc_match = re.search(r'(?:accessed|retrieved|downloaded)\s+(?:on\s+)?([A-Za-z]+\.?\s+\d{1,2},?\s*\d{4})', full_search_text, re.IGNORECASE)
+    if acc_match: result['access_date'] = acc_match.group(1)
+    
+    # 出版社/地點
+    pub_match = re.search(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s+([A-Z]{2,}(?:,\s+[A-Z]{2,})?)\s*:\s*([^,]+)', full_search_text)
+    if pub_match:
+        result['location'] = pub_match.group(1) + ', ' + pub_match.group(2)
+        result['publisher'] = pub_match.group(3)
+    if result['source'] and result['title']:
+        # 移除標點符號和空格後進行比較
+        norm_source = re.sub(r'\W+', '', result['source']).lower()
+        norm_title = re.sub(r'\W+', '', result['title']).lower()
+        
+        # 如果高度相似，且不是期刊或會議 (通常期刊名不會跟標題一樣)，則清空 Source
+        if norm_source == norm_title or norm_source in norm_title:
+            # 但要保留 "Proceedings of..." 這種合法的重複 (雖然標題通常不會是 Proceedings)
+            # 針對書籍特別處理
+            if result['source_type'] in ['Book', 'Thesis/Dissertation', 'Unknown', 'Website/Online']:
+                result['source'] = None
     return result
 
 # --- 中文解析 ---
@@ -1552,7 +1877,7 @@ def process_single_reference(ref_text):
             data = extract_apa_zh_detailed(ref_text)
     else:
         if re.match(r'^\s*[\[【]', ref_text):
-            data = extract_ieee_en_detailed(ref_text)
+            data = extract_ieee_reference_full(ref_text)
         else:
             data = extract_apa_en_detailed(ref_text)
             
@@ -1992,84 +2317,137 @@ elif uploaded_file:
         
         if ieee_list:
             st.info(f"共找到 {len(ieee_list)} 筆 IEEE 格式參考文獻")
+    
+        for i, ref in enumerate(ieee_list, 1):
+            # 準備顯示用的標題與圖示
+            title_text = ref.get('title', '未提供標題')
+            ref_num = ref.get('ref_number', str(i))
             
-            for i, ref in enumerate(ieee_list, 1):
-                # 簡單推測 source_type 以選擇 icon
-                src = ref.get('source', '') or ''
-                title_text = ref.get('title', '未提供標題')
-                ref_num = ref.get('ref_number', str(i))
-                
-                # Icon 推測邏輯
-                icon = '📄' 
-                if any(x in src.lower() for x in ['proc.', 'proceedings', 'conference', 'symposium', 'workshop']):
-                    icon = '📄' 
-                elif any(x in src.lower() for x in ['journal', 'trans.', 'transactions', 'letters', 'magazine']):
-                    icon = '📚' 
-                elif any(x in src.lower() for x in ['thesis', 'dissertation']):
-                    icon = '🎓' 
-                elif 'http' in src.lower() or 'www' in src.lower():
-                    icon = '🌐' 
-                
-                with st.expander(f"{icon} [{ref_num}] {title_text}", expanded=False):
-                    
-                    c_info, c_action = st.columns([3, 1])
-                    
-                    with c_info:
-                        # [FIX] 作者顯示處理：如果是 list，根據語言合併成字串
-                        if ref.get('authors'):
-                            authors_data = ref['authors']
-                            if isinstance(authors_data, list):
-                                # 中文用頓號，英文用逗號
-                                if ref.get('lang') == 'ZH':
-                                    author_display = "、".join(authors_data)
-                                else:
-                                    # 這裡可以根據需要調整英文的多作者顯示方式 (如 ", " 或 " & ")
-                                    author_display = ", ".join(authors_data)
-                            else:
-                                author_display = authors_data
-                                
-                            st.markdown(f"**👥 作者**")
-                            st.markdown(f"　└─ {author_display}")
+            # 根據 source_type 決定圖示與標籤
+            stype = ref.get('source_type', 'Unknown')
+            if 'Conference' in stype:
+                icon, type_tag = '🗣️', '[C]'
+            elif 'Journal' in stype:
+                icon, type_tag = '📚', '[J]'
+            elif 'Thesis' in stype:
+                icon, type_tag = '🎓', '[D]'
+            elif 'Website' in stype:
+                icon, type_tag = '🌐', '[W]'
+            elif 'Book' in stype:
+                icon, type_tag = '📖', '[B]'
+            elif 'Patent' in stype:
+                icon, type_tag = '💡', '[P]'
+            elif 'Report' in stype:
+                icon, type_tag = '📄', '[R]'
+            else:
+                icon, type_tag = '📄', ''
 
-                        if ref.get('title'):
-                            st.markdown(f"**📝 標題**")
-                            st.markdown(f"　└─ {ref['title']}")
-                        
-                        if ref.get('source'):
-                            st.markdown(f"**📖 來源**")
-                            st.markdown(f"　└─ {ref['source']}")
-                            
-                        vol_issue = []
-                        if ref.get('volume'): vol_issue.append(f"Vol. {ref['volume']}")
-                        if ref.get('issue'): vol_issue.append(f"No. {ref['issue']}")
-                        if vol_issue:
-                            st.markdown(f"**📊 卷期**")
-                            st.markdown(f"　└─ {', '.join(vol_issue)}")
-                        
-                        if ref.get('pages'):
-                            st.markdown(f"**📄 頁碼**")
-                            st.markdown(f"　└─ pp. {ref['pages']}")
-                        
-                        if ref.get('year'):
-                            st.markdown(f"**📅 年份**：{ref['year']}")
-                            
-                        if ref.get('doi'):
-                            st.markdown(f"**🔍 DOI**")
-                            st.markdown(f"　└─ [{ref['doi']}](https://doi.org/{ref['doi']})")
-                            
-                        st.markdown("**📍 原文**")
-                        st.code(ref['original'], language=None)
-                    
-                    with c_action:
-                        st.markdown("**🛠️ 格式轉換**")
-                        if st.button("轉 APA", key=f"ieee_btn_apa_{i}"):
-                            st.code(convert_en_ieee_to_apa(ref), language='text')
+            # 展開區塊標題
+            with st.expander(f"{icon} [{ref_num}] {title_text} {type_tag}", expanded=False):
+                
+                c_info, c_action = st.columns([3, 1])
+                
+                with c_info:
+                    # === 1. 作者 ===
+                    if ref.get('authors'):
+                        st.markdown(f"**👥 作者**")
+                        # 如果有解析好的作者列表，優先使用
+                        if ref.get('parsed_authors'):
+                            # 將 [{'last': 'Lin', 'first': 'K. P.'}, ...] 轉為 "K. P. Lin"
+                            auth_list = [f"{a.get('first', '')} {a.get('last', '')}".strip() for a in ref['parsed_authors']]
+                            st.markdown(f"　└─ {', '.join(auth_list)}")
+                        else:
+                            # 否則直接顯示原始字串
+                            st.markdown(f"　└─ {ref['authors']}")
 
-        else:
-            st.info("未找到 IEEE 格式參考文獻")
-            
-        st.markdown("---")
-        
+                    # === 2. 標題 ===
+                    if ref.get('title'):
+                        st.markdown(f"**📝 標題**")
+                        st.markdown(f"　└─ {ref['title']}")
+                    
+                    # === 3. 來源 (優先顯示具體名稱) ===
+                    source_show = ref.get('conference_name') or ref.get('journal_name') or ref.get('source')
+                    if source_show:
+                        label = "會議名稱" if ref.get('conference_name') else ("期刊名稱" if ref.get('journal_name') else "來源出處")
+                        st.markdown(f"**📖 {label}**")
+                        st.markdown(f"　└─ {source_show}")
+                    # === 4. 卷期與頁碼 (獨立顯示) ===
+                    if ref.get('volume') or ref.get('issue'):
+                        vol_str = f"Vol. {ref['volume']}" if ref.get('volume') else ""
+                        issue_str = f"No. {ref['issue']}" if ref.get('issue') else ""
+                        vi_display = ", ".join(filter(None, [vol_str, issue_str]))
+                        
+                        st.markdown(f"**📊 卷期**")
+                        st.markdown(f"　└─ {vi_display}")
+                    
+                    if ref.get('pages'):
+                        st.markdown(f"**📄 頁碼**")
+                        st.markdown(f"　└─ pp. {ref['pages']}")
+                        
+                    # === 5. 年份與月份 (獨立顯示) ===
+                    if ref.get('year'):
+                        date_str = ref['year']
+                        if ref.get('month'):
+                            date_str = f"{ref['month']} {date_str}" # 例如: May 2014
+                        st.markdown(f"**📅 年份**")
+                        st.markdown(f"　└─ {date_str}")    
+                    # === 4. 出版詳細資訊 (卷/期/頁/月/年) ===
+                    # details = []
+                    # if ref.get('volume'): details.append(f"Vol. {ref['volume']}")
+                    # if ref.get('issue'): details.append(f"No. {ref['issue']}")
+                    # if ref.get('pages'): details.append(f"pp. {ref['pages']}")
+                    # if ref.get('month'): details.append(f"{ref['month']}")
+                    # if ref.get('year'): details.append(f"{ref['year']}")
+                    
+                    # if details:
+                    #     st.markdown(f"**📊 出版資訊**")
+                    #     st.markdown(f"　└─ {', '.join(details)}")
+                    
+                    # # === 5. 出版社與地點 ===
+                    # pub_loc = []
+                    # if ref.get('publisher'): pub_loc.append(ref['publisher'])
+                    # if ref.get('location'): pub_loc.append(ref['location'])
+                    # if pub_loc:
+                    #     st.markdown(f"**🏢 出版單位**")
+                    #     st.markdown(f"　└─ {', '.join(pub_loc)}")
+
+                    # === 6. 特殊編號 (報告號/專利號/版本) ===
+                    extras = []
+                    if ref.get('report_number'): extras.append(f"Report No.: {ref['report_number']}")
+                    if ref.get('patent_number'): extras.append(f"Patent No.: {ref['patent_number']}")
+                    if ref.get('edition'): extras.append(f"Edition: {ref['edition']}")
+                    if extras:
+                        st.markdown(f"**📌 其他資訊**")
+                        for item in extras:
+                            st.markdown(f"　└─ {item}")
+
+                    # === 7. 電子資源 (DOI / URL) ===
+                    if ref.get('doi'):
+                        st.markdown(f"**🔍 DOI**")
+                        st.markdown(f"　└─ [{ref['doi']}](https://doi.org/{ref['doi']})")
+                        
+                    if ref.get('url'):
+                        st.markdown(f"**🌐 URL**")
+                        st.markdown(f"　└─ [{ref['url']}]({ref['url']})")
+                        if ref.get('access_date'):
+                            st.caption(f"　　(Access Date: {ref['access_date']})")
+                        
+                    # === 8. 原文 ===
+                    st.divider()
+                    st.caption("📍 原始參考文獻文字")
+                    st.code(ref['original'], language=None)
+                
+                with c_action:
+                    st.markdown("**🛠️ 操作**")
+                    # 這裡假設您有 convert_en_ieee_to_apa 函式
+                    if st.button("轉 APA", key=f"ieee_btn_apa_{i}"):
+                        st.code(convert_en_ieee_to_apa(ref), language='text')
+
+                    # else:
+                    #     st.info("未找到 IEEE 格式參考文獻")
+
+            # st.markdown("---")
+
         # 3. APA 與其他格式展示區
         st.markdown("### 📚 APA 與其他格式參考文獻")
         apa_list = [ref for ref in parsed_refs if 'APA' in ref.get('format', '') or 'Numbered' in ref.get('format', '')]
