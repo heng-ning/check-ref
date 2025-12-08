@@ -35,12 +35,56 @@ def has_chinese(text):
     return bool(re.search(r'[\u4e00-\u9fff]', text))
 
 def extract_doi(text):
-    """[NEW] 從文字中提取 DOI (通用)"""
-    # [Updated from test1204-6] 支援更多變體
-    doi_match = re.search(r'(?:doi:|DOI:|https?://doi\.org/)\s*(10\.\d{4,}/[^\s。]+)', text)
+    """[NEW] 從文字中提取 DOI (通用，支援斷行和空格)"""
+    # 方法1：處理 "doi: 10.xxxx" 或 "DOI: 10.xxxx" 格式
+    doi_match = re.search(r'(?:doi:|DOI:)\s*(10\.\s*\d{4,}[^\s。]*(?:\s+[^\s。]+)*)', text, re.IGNORECASE)
     if doi_match:
-        return doi_match.group(1).rstrip('。.,')
+        raw_doi = doi_match.group(1)
+        clean_doi = re.sub(r'\s+', '', raw_doi)
+        clean_doi = clean_doi.rstrip('。.,;')
+        return clean_doi
+    
+    # 方法2：處理 "https://doi.org/10.xxxx" 格式（關鍵修正）
+    doi_start = re.search(r'https?://doi\.org/', text, re.IGNORECASE)
+    if doi_start:
+        # 從 doi.org/ 後面開始抓取
+        after_prefix = text[doi_start.end():]
+        
+        # 策略：從 10. 開始，一直抓到遇到「明確的結束標記」為止
+        # 明確的結束標記：連續兩個換行、句號+空格+大寫字母、或文末
+        
+        # 先找到 DOI 的結束位置
+        end_markers = [
+            r'\n\s*\n',           # 兩個換行（段落分隔）
+            r'\.\s+[A-Z]',        # 句號+空格+大寫（下一句開始）
+            r'[。，]\s',          # 中文標點+空格
+        ]
+        
+        end_pos = len(after_prefix)
+        for marker in end_markers:
+            match = re.search(marker, after_prefix)
+            if match and match.start() < end_pos:
+                end_pos = match.start()
+        
+        # 提取 DOI 內容（可能包含空格、換行）
+        doi_content = after_prefix[:end_pos]
+        
+        # 清理：只保留 10.xxxx/xxxx 部分
+        # 允許數字、字母、點、斜線、連字號，以及中間的空格
+        doi_pattern = re.match(r'(10\.\S+(?:\s+\S+)*?)(?=\s*$)', doi_content)
+        if doi_pattern:
+            raw_doi = doi_pattern.group(1)
+            # 移除所有空白字元
+            clean_doi = re.sub(r'\s+', '', raw_doi)
+            # 移除結尾的標點
+            clean_doi = clean_doi.rstrip('。.,;')
+            
+            # 最終驗證：確保格式正確 (10.xxxx/xxxx)
+            if re.match(r'10\.\d{4,}/.+', clean_doi):
+                return clean_doi
+    
     return None
+
 # =================================================
 
 # ==================== 1. 文件讀取模組 ====================
@@ -1187,70 +1231,92 @@ def find_apa_head(ref_text):
     
     return True
 
-# [OLD] 舊版 is_reference_head_unified (已被下方新版取代)
-# def is_reference_head_unified(para):
-#     """
-#     [NEW] 判斷一行文字是否為一條新文獻的開頭
-#     """
-#     para = normalize_text(para)
-#     if re.match(r'^\s*[\[【]\s*\d+\s*[】\]]', para):
-#         return True
-#     if find_apa_head(para):
-#         return True
-#     year_match = re.search(r'^.*[\.,]\s*(19|20)\d{2}[a-z]?[\.,]', para[:50])
-#     if year_match:
-#         return True
-#     return False
-
 def is_reference_head_unified(para):
     """
-    [UPDATED from test1204-6] [APA/混合模式] 判斷一行文字是否為新文獻 (已加強防誤判)
+    [UPDATED] [APA/混合模式] 判斷一行文字是否為新文獻
     """
     para = normalize_text(para)
-    
-    # 1. 🚫 黑名單：絕對不是新文獻的情況
-    
-    # A. 網址保護 (避免 DOI 斷行被當成新文獻)
-    if re.search(r'(https?://|doi\.org|doi:|www\.)', para, re.IGNORECASE):
-        # 除非這行同時有強烈的編號特徵 [1]，否則視為網址
-        if not re.match(r'^\s*[\[【]', para):
-            return False
-            
-    # B. 月份/日期保護 (避免 "Mar. 2022." 被誤判)
-    # 檢查開頭是否為英文月份
-    if re.match(r'^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s*\d{4}', para, re.IGNORECASE):
-        return False
-        
-    # C. 卷期頁碼保護 (避免 Vol. 2, pp. 123)
-    if re.match(r'^(Vol\.|No\.|pp\.|p\.|Page)', para, re.IGNORECASE):
-        return False
-        
-    # D. 小寫開頭保護 (英文人名通常大寫)
-    if re.match(r'^[a-z]', para):
-        return False
 
-    # 2. ✅ 白名單：符合這些特徵就是新文獻
+    # DOI 特徵：數字開頭 + 斜線 + 字母數字混合
+    if re.match(r'^\d{4,}/[a-z0-9\.\-/]+', para, re.IGNORECASE):
+        return False
+    
+    # 0. ✅ 強特徵白名單：明確的新文獻開頭（優先級最高）
     
     # A. 編號格式 [1]
     if re.match(r'^\s*[\[【]\s*\d+\s*[】\]]', para):
         return True
+    
+    # B. 標準 APA 作者格式：Last, F. 開頭
+    # 只要開頭是 "姓, 名縮寫"，且不是小寫或數字開頭，就很可能是新文獻
+    # 不管年份在哪（可能被斷行到下一段）
+    author_start = re.match(r'^([A-Z][A-Za-z\-\']+),\s+([A-Z]\.(?:\s*[A-Z]\.)*)', para)
+    if author_start:
+        # 進一步驗證：排除明顯不是作者的情況
+        # 1. 後面不能直接接小寫字母（表示是句子中間）
+        after_author = para[author_start.end():].strip()
+        if after_author and after_author[0].islower():
+            pass  # 可能是句子，不處理
+        else:
+            # 2. 檢查是否有合理的後續內容（逗號、&、or、年份括號）
+            if re.match(r'^[,&\(]', after_author) or not after_author:
+                return True
+            # 3. 如果後面還有其他作者名（說明是作者列表開頭）
+            if re.search(r'[,&]\s+[A-Z][a-z]+,\s+[A-Z]\.', after_author[:50]):
+                return True
+    
+    # 1. 🚫 黑名單：絕對不是新文獻的情況
+    
+    # A. 網址保護
+    if re.search(r'(https?://|doi\.org|doi:|www\.)', para, re.IGNORECASE):
+        url_only = re.sub(r'https?://[^\s]+', '', para).strip()
+        if len(url_only) < 10:
+            return False
+        if not (re.match(r'^\s*[\[【]', para) or author_start):
+            return False
+            
+    # B. 月份/日期保護
+    if re.match(r'^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s*\d{4}', para, re.IGNORECASE):
+        return False
         
-    # B. APA 標準格式 (Year)
+    # C. 卷期頁碼保護
+    if re.match(r'^(Vol\.|No\.|pp\.|p\.|Page)', para, re.IGNORECASE):
+        return False
+        
+    # D. 小寫開頭保護
+    if re.match(r'^[a-z]', para):
+        return False
+    
+    # E. 作者列表延續保護（只有 & 或逗號+名字，沒有姓氏開頭）
+    # 例如：", & Varatharajan, S." 這種不算新文獻開頭
+    if re.match(r'^[,&]\s', para):
+        return False
+
+    # 如果開頭是縮寫（如 "A., Malhotra"），但後面沒有年份括號 (20XX)
+    # 這是作者列表延續，不是新文獻開頭
+    # 例如："A., Malhotra, R. K., & Martin, J. L." (沒有年份)
+    if re.match(r'^[A-Z]\.(?:\s*[A-Z]\.)*\s*,', para):
+        # 檢查這一段是否有年份括號 (19XX) 或 (20XX)
+        # 如果沒有年份，這肯定是作者列表延續
+        if not re.search(r'[（(]\s*(?:19|20)\d{2}', para):
+            return False
+
+    # 2. ✅ 其他白名單特徵
+    
+    # C. APA 標準格式 (Year) - 年份在括號內
     if find_apa_head(para):
         return True
         
-    # C. 類 APA (Year in dots, e.g., Author. 2020.)
-    # 嚴格限制：年份前必須有標點，且前面要有足夠長度的文字(作者名)
+    # D. 類 APA (Year in dots)
     year_match = re.search(r'[\.,]\s*(19|20)\d{2}[a-z]?[\.,]', para[:80])
     if year_match:
         pre_text = para[:year_match.start()].strip()
-        if len(pre_text) > 3: # 作者名通常 > 3字
-            # 如果是純英文，通常要有逗號 (Last, F.)
+        if len(pre_text) > 3:
             if not has_chinese(para):
                 if ',' in pre_text or '.' in pre_text:
                     return True
             else:
-                return True # 中文名字較短且不一定有逗號
+                return True
 
     return False
 
@@ -1259,14 +1325,54 @@ def merge_references_unified(paragraphs):
     merged = []
     current_ref = ""
     
-    for para in paragraphs:
+    for i, para in enumerate(paragraphs):
         para = para.strip()
         if not para: continue
         
         # 排除純數字頁碼 (長度短且無連字號)
         if para.isdigit() and len(para) < 4: continue
+
+        # 排除頁首/頁尾文字
+        # 特徵：全大寫、長度短、沒有年份括號、沒有編號
+        if para.isupper() and len(para) < 50:
+            # 1. 包含 ET AL 的作者頁首
+            if 'ET AL' in para:
+                continue
+            # 2. 縮寫開頭的頁首（如 "S. JAYDARIFARD ET AL."）
+            if re.match(r'^[A-Z]\.\s+[A-Z]+', para):
+                continue
+            # 3. 期刊名稱或章節標題的頁首（如 "TRANSPORT REVIEWS"）
+            # 排除條件：全大寫 + 沒有數字 + 沒有括號 + 沒有標點（除了空格）
+            if not re.search(r'[\d\(\)\[\]\.,:;]', para):
+                continue  # 跳過這行
         
-        if is_reference_head_unified(para):
+        is_new_ref = is_reference_head_unified(para)
+
+        # 特殊判斷：如果當前文獻以 & 或 , 結尾（表示作者列表未完成）
+        # 且這行開頭是作者名+年份，這行應該是作者列表的最後一位，不是新文獻
+        if is_new_ref and current_ref:
+            # 檢查上一行結尾
+            current_ref_stripped = current_ref.rstrip()
+            if current_ref_stripped.endswith('&') or current_ref_stripped.endswith(','):
+                # 檢查這行是否為：作者名 + 年份（作者列表最後一位的模式）
+                # 例如：Varatharajan, S. (2019). ...
+                if re.match(r'^[A-Z][A-Za-z\-\']+,\s+[A-Z]\.\s*[（(]', para):
+                    # 這是作者列表的最後一位，應該合併
+                    is_new_ref = False
+
+        # 如果當前累積的文獻沒有年份，且新段落有年份
+        # 那新段落應該是當前文獻的延續，不是新文獻
+        if is_new_ref and current_ref:
+            # 檢查 current_ref 是否有年份
+            has_year_in_current = bool(re.search(r'[（(]\s*(?:19|20)\d{2}', current_ref))
+            # 檢查 para 是否有年份
+            has_year_in_para = bool(re.search(r'[（(]\s*(?:19|20)\d{2}', para))
+            
+            # 如果當前文獻沒年份，但新段落有年份 → 新段落是延續
+            if not has_year_in_current and has_year_in_para:
+                is_new_ref = False
+        
+        if is_new_ref:
             if current_ref:
                 merged.append(current_ref)
             current_ref = para
@@ -1274,14 +1380,29 @@ def merge_references_unified(paragraphs):
             if current_ref:
                 if has_chinese(current_ref[-1:]) and has_chinese(para[:1]):
                     current_ref += "" + para
-                elif current_ref.endswith('-'): 
-                    current_ref = current_ref[:-1] + para
+                elif current_ref.endswith('-'):
+                    # 判斷是否為單字斷行
+                    if para and para[0].islower():
+                        current_ref = current_ref[:-1] + para
+                    else:
+                        current_ref = current_ref + " " + para
+                # 處理頁碼斷行：連字號+空格+數字
+                elif re.search(r'[\–\-—]\s*$', current_ref) and para and para[0].isdigit():
+                    current_ref = current_ref.rstrip() + para
+                # 處理 DOI 斷行
+                elif re.search(r'doi\.org/[^\s]+\.$', current_ref, re.IGNORECASE) and para and para[0].isdigit():
+                    current_ref = current_ref + para  # DOI 直接連接
+                # 處理一般 URL 結尾是句點的斷行
+                elif re.search(r'https?://[^\s]+\.$', current_ref) and para and not para[0].isupper():
+                    current_ref = current_ref + para
                 else:
                     current_ref += " " + para
             else:
                 current_ref = para
             
-    if current_ref: merged.append(current_ref)
+    if current_ref: 
+        merged.append(current_ref)
+    
     return merged
 
 def merge_references_ieee_strict(paragraphs):
@@ -1309,7 +1430,11 @@ def merge_references_ieee_strict(paragraphs):
             if current_ref:
                 # 處理斷字
                 if current_ref.endswith('-'):
-                    current_ref = current_ref[:-1] + para
+                    # URL 斷行保護：如果下一行是小寫/數字開頭，保留連字號
+                    if para and (para[0].islower() or para[0].isdigit()):
+                        current_ref = current_ref + para  # 保留連字號
+                    else:
+                        current_ref = current_ref[:-1] + para  # 一般斷字，移除連字號
                 # 處理中英文間距
                 elif has_chinese(current_ref[-1:]) and has_chinese(para[:1]):
                     current_ref += para
@@ -1328,18 +1453,36 @@ def merge_references_ieee_strict(paragraphs):
 # --- 英文解析 ---
 def parse_apa_authors_en(author_str):
     if not author_str: return []
-    clean_str = re.sub(r'\s+(&|and)\s+', ' ', author_str)
-    segments = re.split(r'\.,\s*', clean_str)
+    
+    # 先處理 & 或 and（APA 最後一個作者前的連接詞）
+    # 將 & 或 and 替換成逗號，統一處理
+    clean_str = re.sub(r'\s*,?\s*(&|and)\s+', ', ', author_str, flags=re.IGNORECASE)
+    
+    # 用「., 」（點號+逗號+空格）來分割作者
+    # 這樣可以正確處理 "Last, F. M., Next, A."
+    segments = re.split(r'\.\s*,\s*', clean_str)
+    
     authors = []
     for seg in segments:
         seg = seg.strip()
         if not seg: continue
-        if not seg.endswith('.'): seg += '.'
+        
+        # 移除結尾的點號（如果有）
+        seg = seg.rstrip('.')
+        
         if ',' in seg:
+            # 格式：Last, F. M.
             parts = seg.split(',', 1)
-            authors.append({'last': parts[0].strip(), 'first': parts[1].strip()})
+            last = parts[0].strip()
+            first = parts[1].strip()
+            # 確保 first name 有點號結尾
+            if first and not first.endswith('.'):
+                first += '.'
+            authors.append({'last': last, 'first': first})
         else:
+            # 只有姓氏
             authors.append({'last': seg, 'first': ''})
+    
     return authors
 
 def extract_apa_en_detailed(ref_text):
@@ -1348,30 +1491,123 @@ def extract_apa_en_detailed(ref_text):
         'authors': "Unknown", 'parsed_authors': [],
         'year': None, 'title': None, 'source': None,
         'volume': None, 'issue': None, 'pages': None,
+        'article_number': None,
+        'publisher': None,
+        'editors': None,
+        'book_title': None,
+        'source_type': None,  
+        'url': None,
         'doi': None, 'original': ref_text
     }
+
+    # 先提取 DOI 和 URL (提前處理，避免干擾標題解析)
     result['doi'] = extract_doi(ref_text)
+
+    # 提取 URL (支援各種格式，包含空格斷行和連字號斷行)
+    # 找到 https:// 開頭，然後向後抓取直到遇到明確的結束標記
+    url_start = re.search(r'https?://', ref_text)
+    if url_start:
+        # 從 https:// 開始向後掃描
+        start_pos = url_start.start()
+        url_text = ref_text[start_pos:]
+        
+        # 找到 URL 結束的位置（遇到句號+空格、逗號、或文末）
+        # 但要允許 URL 內部的點、斜線、連字號、空格
+        end_match = re.search(r'(?:\.\s+[A-Z]|,\s|$)', url_text)
+        if end_match:
+            raw_url = url_text[:end_match.start()].strip()
+        else:
+            raw_url = url_text.strip()
+        
+        # 清理 URL：
+        # 1. 先處理「連字號+空白」-> 保留連字號
+        clean_url = re.sub(r'-\s+', '-', raw_url)
+        # 2. 移除所有剩餘空白
+        clean_url = re.sub(r'\s+', '', clean_url)
+        # 3. 移除結尾的句號（如果有）
+        clean_url = clean_url.rstrip('.')
+        
+        result['url'] = clean_url
+        # 保留 url_match 供後續使用
+        url_match = type('obj', (object,), {'group': lambda self, n: raw_url if n == 0 else None})()
+    else:
+        url_match = None
     
     year_match = re.search(r'[（(]\s*(\d{4}[a-z]?|n\.d\.)\s*(?:,\s*[A-Za-z]+\.?\s*\d{0,2})?\s*[)）]', ref_text)
     if not year_match: return result
     
-    result['year'] = year_match.group(1)
+    year_group = year_match.group(1)
+    result['year'] = year_group if year_group.lower() != 'n.d.' else 'n.d.'
+
+    # 提取完整日期 (Month Day) - 先檢查 group 是否存在
+    try:
+        date_match = year_match.group(2)
+        if date_match:
+            result['month'] = date_match
+    except IndexError:
+        pass  # 沒有月份資訊，跳過
+    
     author_part = ref_text[:year_match.start()].strip()
     result['authors'] = author_part
     result['parsed_authors'] = parse_apa_authors_en(author_part)
     
     content_part = ref_text[year_match.end():].strip()
     if content_part.startswith('.'): content_part = content_part[1:].strip()
+
+    # 移除 DOI 和 URL，避免它們被誤判為標題或來源
     if result['doi']:
         content_part = re.sub(r'(?:doi:|DOI:|https?://doi\.org/)\s*10\.\d{4,}/[^\s。]+', '', content_part).strip()
 
-    meta_match = re.search(r',\s*(\d+)(?:\s*\((\d+)\))?,\s*([\d\–\-]+)(?:\.)?$', content_part)
+    if result['url']:
+        # 移除原始 URL（包含所有可能的空格變體）
+        if url_match:
+            # 將原始 URL 中的空格變成彈性匹配模式
+            original_url_text = url_match.group(0)
+            # 將 URL 拆成片段，用 \s* 連接（允許任意空格）
+            url_parts = original_url_text.split()
+            flexible_pattern = r'\s*'.join(re.escape(part) for part in url_parts)
+            content_part = re.sub(flexible_pattern, '', content_part, flags=re.IGNORECASE)
+        
+        # 也移除清理後的 URL（以防萬一）
+        content_part = content_part.replace(result['url'], '')
+        
+        # 清理殘留的多餘空格和標點
+        content_part = re.sub(r'\s+', ' ', content_part).strip()
+        content_part = content_part.rstrip('. ')
+
+    # 判斷是否為書籍章節或一般書籍
+    # 優先檢查是否為書籍章節格式（In ... (Eds.)）
+    is_book_chapter = bool(re.search(r'\bIn\s+.+?\s*\(Eds?\.\)', content_part, re.IGNORECASE))
+    # 或是作者為編者，或標題包含書籍關鍵字
+    is_book = is_book_chapter or bool(
+        re.search(r'\(eds?\.\)', author_part, re.IGNORECASE) or 
+        re.search(r'\b(manual|handbook|guide|textbook|encyclopedia|dictionary)\b', content_part, re.IGNORECASE)
+    )
+
+    # 提取後設資料 (卷期頁碼/文章編號)
+    # 格式 1: Journal, Vol(Issue), pages. 例如：Journal, 14(2), 123-456.
+    meta_match = re.search(r',\s*(\d+)(?:\s*\((\d+)\))?,\s*([\d\–\-]+)(?:\.|\s|$)', content_part)
+
     if meta_match:
         result['volume'] = meta_match.group(1)
         result['issue'] = meta_match.group(2)
-        result['pages'] = meta_match.group(3)
+        pages_or_article = meta_match.group(3)
+        
+        # 判斷是頁碼還是文章編號
+        # 文章編號通常是純數字（如 100571），頁碼有連字號（如 123-456）
+        if '-' in pages_or_article or '–' in pages_or_article:
+            result['pages'] = pages_or_article
+        else:
+            # 純數字，可能是文章編號
+            if len(pages_or_article) >= 5:  # 文章編號通常較長
+                result['article_number'] = pages_or_article
+            else:
+                result['pages'] = pages_or_article  # 短數字可能還是頁碼
+        
         title_source_part = content_part[:meta_match.start()].strip()
+
     else:
+        # 格式 2: 傳統頁碼格式 pp. 123-456
         pp_match = re.search(r',?\s*pp?\.?\s*([\d\–\-]+)(?:\.)?$', content_part)
         if pp_match:
             result['pages'] = pp_match.group(1)
@@ -1379,12 +1615,74 @@ def extract_apa_en_detailed(ref_text):
         else:
             title_source_part = content_part
 
-    split_index = title_source_part.rfind('. ')
-    if split_index != -1:
-        result['title'] = title_source_part[:split_index + 1].strip().rstrip('.')
-        result['source'] = title_source_part[split_index + 1:].strip()
+    # 改進標題與來源分割邏輯
+    if is_book:
+        # === 先檢查是否為書籍章節格式 ===
+        # 格式：章節標題. In 編者 (Eds.), 書名 (pp. xxx). 出版社.
+        # 改進正則表達式，更精確匹配
+        chapter_match = re.search(
+            r'^(.+?)\.\s+In\s+(.+?)\s*\(Eds?\.\),\s*(.+?)\s*\(pp\.\s*([\d\s\–\-—]+)\)', 
+            title_source_part, 
+            re.IGNORECASE
+        )
+
+        if chapter_match:
+            # 這是書籍章節
+            result['title'] = chapter_match.group(1).strip()  # 章節標題
+            result['editors'] = "In " + chapter_match.group(2).strip() + " (Eds.)"  # 編者
+            result['book_title'] = chapter_match.group(3).strip()  # 書名
+            
+            # 清理頁碼中的多餘空格
+            raw_pages = chapter_match.group(4).strip()
+            clean_pages = re.sub(r'\s+', '', raw_pages)  # 移除所有空格
+            result['pages'] = clean_pages  # 例如 "254–257"
+            
+            # 出版社在括號後面
+            after_chapter = title_source_part[chapter_match.end():].strip()
+            # 移除開頭的句點和空格
+            after_chapter = after_chapter.lstrip('. ').strip()
+            if after_chapter:
+                # 移除結尾的句點
+                result['publisher'] = after_chapter.rstrip('.')
+            
+            result['source_type'] = 'Book Chapter'
+        else:
+            # 一般書籍格式：標題. 出版社.
+            split_match = re.search(r'\.\s+([A-Z])', title_source_part)
+            
+            if split_match:
+                split_pos = split_match.start()
+                result['title'] = title_source_part[:split_pos].strip()
+                
+                # 出版社部分
+                publisher_part = title_source_part[split_pos + 1:].strip()
+                next_dot = publisher_part.find('.')
+                if next_dot != -1:
+                    result['publisher'] = publisher_part[:next_dot].strip()
+                else:
+                    result['publisher'] = publisher_part.rstrip('.')
+            else:
+                result['title'] = title_source_part.rstrip('.')
     else:
-        result['title'] = title_source_part
+        # 期刊格式：標題. 期刊名
+        split_index = title_source_part.rfind('. ')
+        if split_index != -1:
+            result['title'] = title_source_part[:split_index].strip()
+            result['source'] = title_source_part[split_index + 1:].strip().rstrip('.')
+        else:
+            if not title_source_part.startswith('http'):
+                result['title'] = title_source_part.rstrip('.')
+
+    # 清理所有文字欄位中的斷行連字號
+    text_fields = ['title', 'source', 'publisher', 'editors', 'book_title', 'journal_name', 'conference_name']
+    for field in text_fields:
+        if result.get(field) and isinstance(result[field], str):
+            # 移除單字中的斷行連字號（如 "perform- ance" -> "performance"）
+            # 模式1: 連字號+空格+小寫字母
+            result[field] = re.sub(r'-\s+([a-z])', r'\1', result[field])
+            # 模式2: 單純的連字號+空格（備用）
+            result[field] = re.sub(r'-\s+', '', result[field])
+
     return result
 
 def parse_ieee_authors(authors_str):
@@ -1822,12 +2120,25 @@ def convert_en_apa_to_ieee(data):
     parts = []
     if auth_str: parts.append(auth_str + ",")
     if data.get('title'): parts.append(f'"{data["title"]},"')
-    if data.get('source'): parts.append(f"{data['source']},")
+    
+    # 分別處理期刊和書籍
+    if data.get('source'):  # 期刊
+        parts.append(f"{data['source']},")
+    elif data.get('publisher'):  # 書籍
+        parts.append(f"{data['publisher']},")
+    
     if data.get('volume'): parts.append(f"vol. {data['volume']},")
     if data.get('issue'): parts.append(f"no. {data['issue']},")
     if data.get('pages'): parts.append(f"pp. {data['pages']},")
+    
+    # 加入月份
+    if data.get('month'): parts.append(f"{data['month']}")
     if data.get('year'): parts.append(f"{data['year']}.")
+    
+    # 加入 DOI 或 URL
     if data.get('doi'): parts.append(f"doi: {data['doi']}.")
+    elif data.get('url'): parts.append(f"[Online]. Available: {data['url']}")
+    
     return " ".join(parts)
 
 def convert_en_ieee_to_apa(data):
@@ -2086,6 +2397,14 @@ if not uploaded_file and (st.session_state.in_text_citations or st.session_state
     st.info("📥 顯示已匯入的資料")
 
 elif uploaded_file:
+    # 清空舊資料，確保切換檔案時不會顯示舊分析結果
+    st.session_state.in_text_citations = []
+    st.session_state.reference_list = []
+    if 'missing_refs' in st.session_state:
+        del st.session_state.missing_refs
+    if 'unused_refs' in st.session_state:
+        del st.session_state.unused_refs
+
     file_ext = uploaded_file.name.split(".")[-1].lower()
     
     st.subheader(f"📄 處理檔案：{uploaded_file.name}")
@@ -2318,7 +2637,7 @@ elif uploaded_file:
         st.markdown("---")
         
         # 2. IEEE 獨立展示區 (仿 1204 風格)
-        st.markdown("### 📖 IEEE 參考文獻詳細解析")
+        st.markdown("### 📖 參考文獻詳細解析")
         ieee_list = [ref for ref in parsed_refs if 'IEEE' in ref.get('format', '')]
         
         if ieee_list:
@@ -2468,7 +2787,7 @@ elif uploaded_file:
                 c_info, c_action = st.columns([3, 1])
                 
                 with c_info:
-                    # [FIX] 作者顯示處理：如果是 list，根據語言合併成字串
+                    # 作者顯示處理：如果是 list，根據語言合併成字串
                     authors_data = ref.get('authors')
                     if isinstance(authors_data, list):
                         if ref.get('lang') == 'ZH':
@@ -2480,10 +2799,46 @@ elif uploaded_file:
 
                     st.markdown(f"**📝 作者**：{author_display}")
                     st.markdown(f"**📄 標題**：{title_display}")
-                    st.markdown(f"**📅 年份**：{ref.get('year')}")
+                    # 顯示年份與月份
+                    year_display = ref.get('year', 'Unknown')
+                    if ref.get('month'):
+                        year_display = f"{ref['year']} ({ref['month']})"
+                    st.markdown(f"**📅 年份**：{year_display}")
                     
-                    if ref.get('source'):
-                        st.markdown(f"**📖 來源**：{ref.get('source')}")
+                    # 根據類型顯示來源/出版社
+                    if ref.get('publisher'):
+                        st.markdown(f"**🏢 出版社**：{ref['publisher']}")
+                    elif ref.get('source'):
+                        st.markdown(f"**📖 期刊/來源**：{ref.get('source')}")
+                    
+                    # 顯示卷期與頁碼/文章編號
+                    pub_info = []
+                    if ref.get('volume'):
+                        pub_info.append(f"Vol. {ref['volume']}")
+                    if ref.get('issue'):
+                        pub_info.append(f"No. {ref['issue']}")
+
+                    if pub_info:
+                        st.markdown(f"**📊 卷期**：{', '.join(pub_info)}")
+
+                    if ref.get('editors'):
+                        st.markdown(f"**✍️ 編輯**：{ref['editors']}")
+                    
+                    if ref.get('book_title'):
+                        st.markdown(f"**📚 書名**：{ref['book_title']}")
+
+                    # 頁碼或文章編號
+                    if ref.get('article_number'):
+                        st.markdown(f"**📄 文章編號**：{ref['article_number']}")
+                    elif ref.get('pages'):
+                        st.markdown(f"**📄 頁碼**：{ref['pages']}")
+                    
+                    # 顯示 DOI
+                    if ref.get('doi'):
+                        st.markdown(f"**🔍 DOI**：[{ref['doi']}](https://doi.org/{ref['doi']})")
+                    # 顯示 URL
+                    elif ref.get('url'):
+                        st.markdown(f"**🌐 URL**：[{ref['url']}]({ref['url']})")
                     
                     st.text_area(
                         label="原文",
