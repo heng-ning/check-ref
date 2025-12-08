@@ -43,7 +43,8 @@ def extract_apa_en_detailed(ref_text):
         'publisher': None,
         'editors': None,
         'book_title': None,
-        'source_type': None,  
+        'source_type': None,
+        'document_type': None,
         'url': None,
         'doi': None, 'original': ref_text
     }
@@ -60,8 +61,8 @@ def extract_apa_en_detailed(ref_text):
         url_text = ref_text[start_pos:]
         
         # 找到 URL 結束的位置（遇到句號+空格、逗號、或文末）
-        # 但要允許 URL 內部的點、斜線、連字號、空格
-        end_match = re.search(r'(?:\.\s+[A-Z]|,\s|$)', url_text)
+        # 遇到「句號+換行+大寫字母」也視為結束（處理 DOI 斷行問題）
+        end_match = re.search(r'(?:\.\s*\n\s*[A-Z]|\.\s+[A-Z]|,\s|$)', url_text)
         if end_match:
             raw_url = url_text[:end_match.start()].strip()
         else:
@@ -213,6 +214,22 @@ def extract_apa_en_detailed(ref_text):
                 result['title'] = title_source_part.rstrip('.')
     else:
         # 期刊格式：標題. 期刊名
+        # 先識別並移除文獻類型標註 (如 [Project Report], Technical Report 等)
+        document_type_pattern = r'\.\s*(\[?(?:Project|Technical|Research|Working|Conference|Discussion)\s+(?:Report|Paper|Brief)\]?)\.'
+        doc_type_match = re.search(document_type_pattern, title_source_part, re.IGNORECASE)
+        
+        if doc_type_match:
+            # 提取文獻類型
+            result['document_type'] = doc_type_match.group(1).strip('[]')
+            
+            # 從 title_source_part 中移除文獻類型
+            title_source_part = (
+                title_source_part[:doc_type_match.start()] + 
+                '. ' + 
+                title_source_part[doc_type_match.end():]
+            ).strip()
+        
+        # 原本的標題與來源分割邏輯
         split_index = title_source_part.rfind('. ')
         if split_index != -1:
             result['title'] = title_source_part[:split_index].strip()
@@ -336,6 +353,8 @@ def is_reference_head_unified(para):
     # DOI 特徵：數字開頭 + 斜線 + 字母數字混合
     if re.match(r'^\d{4,}/[a-z0-9\.\-/]+', para, re.IGNORECASE):
         return False
+    if re.match(r'^[a-z0-9]+\-[a-z]{2}$', para, re.IGNORECASE):
+        return False
     
     # 0. ✅ 強特徵白名單：明確的新文獻開頭（優先級最高）
     
@@ -347,6 +366,29 @@ def is_reference_head_unified(para):
     # 只要開頭是 "姓, 名縮寫"，且不是小寫或數字開頭，就很可能是新文獻
     # 不管年份在哪（可能被斷行到下一段）
     author_start = re.match(r'^([A-Z][A-Za-z\-\']+),\s+([A-Z]\.(?:\s*[A-Z]\.)*)', para)
+    
+    # C. 組織作者格式：開頭大寫單字 + (縮寫) + 年份
+    # 例如：World Health Organization (WHO). (2020)
+    org_author_match = re.match(
+        r'^[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*\s*\([A-Z]+\)\.\s*\((\d{4})', 
+        para
+    )
+    if org_author_match:
+        year = org_author_match.group(1)
+        if is_valid_year(year):
+            return True
+
+    # D. 一般組織作者（沒有縮寫）：開頭多個大寫單字 + 年份
+    # 例如：National Research Council. (2019)
+    org_simple_match = re.match(
+        r'^[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){2,}\.\s*\((\d{4})', 
+        para
+    )
+    if org_simple_match:
+        year = org_simple_match.group(1)
+        if is_valid_year(year):
+            return True
+
     if author_start:
         # 進一步驗證：排除明顯不是作者的情況
         # 1. 後面不能直接接小寫字母（表示是句子中間）
@@ -359,6 +401,10 @@ def is_reference_head_unified(para):
                 return True
             # 3. 如果後面還有其他作者名（說明是作者列表開頭）
             if re.search(r'[,&]\s+[A-Z][a-z]+,\s+[A-Z]\.', after_author[:50]):
+                return True
+            # 4. 如果是 DOI/URL 結尾後的新作者
+            # 檢查：作者格式完整 + 後面有年份 → 這是新文獻
+            if re.search(r'\(\d{4}\)', para):
                 return True
     
     # 1. 🚫 黑名單：絕對不是新文獻的情況
@@ -468,6 +514,24 @@ def merge_references_unified(paragraphs):
             if not has_year_in_current and has_year_in_para:
                 is_new_ref = False
         
+        # 如果當前累積的文獻以 DOI 或完整 URL 結尾且新段落是明確的作者開頭，強制切分
+        if current_ref and not is_new_ref:
+            current_stripped = current_ref.rstrip()
+            # 檢查是否以 DOI 或 URL 結尾
+            ends_with_doi_url = bool(
+                re.search(r'(https?://[^\s]+|doi\.org/[^\s]+|10\.\d{4}/[^\s]+)[.\s]*$', current_stripped)
+            )
+            
+            # 檢查新段落是否為明確的作者開頭
+            clear_author_start = bool(
+                re.match(r'^([A-Z][A-Za-z\-\']+),\s+([A-Z]\.(?:\s*[A-Z]\.)*)', para) and
+                re.search(r'\(\d{4}\)', para)
+            )
+            
+            # 如果兩個條件都滿足，強制切分
+            if ends_with_doi_url and clear_author_start:
+                is_new_ref = True
+
         if is_new_ref:
             if current_ref:
                 merged.append(current_ref)
@@ -594,6 +658,7 @@ import re
 from common_utils import (
     normalize_text,
     has_chinese,
-    extract_doi
+    extract_doi,
+    is_valid_year
 )
 from ieee_module import extract_ieee_reference_full

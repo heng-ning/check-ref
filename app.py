@@ -518,6 +518,9 @@ elif uploaded_file:
                     if ref.get('book_title'):
                         st.markdown(f"**📚 書名**：{ref['book_title']}")
                     
+                    if ref.get('document_type'):
+                        st.markdown(f"**📂 文件類型**：{ref['document_type']}")
+                    
                     # 頁碼/文章編號
                     if ref.get('article_number'):
                         st.markdown(f"**📄 文章編號**：{ref['article_number']}")
