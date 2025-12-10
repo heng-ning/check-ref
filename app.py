@@ -24,7 +24,8 @@ from apa_module import (
     process_single_reference,
     convert_en_apa_to_ieee,
     convert_zh_apa_to_num,
-    convert_zh_num_to_apa
+    convert_zh_num_to_apa,
+    format_pages_display
 )
 
 from checker import check_references
@@ -216,8 +217,9 @@ def display_reference_with_details(ref, index, format_type='IEEE'):
                 st.markdown(f"**📄 文章編號**")
                 st.markdown(f"　└─ {ref['article_number']}")
             elif ref.get('pages'):
+                formatted_pages = format_pages_display(ref['pages'])
                 st.markdown(f"**📄 頁碼**")
-                st.markdown(f"　└─ pp. {ref['pages']}")
+                st.markdown(f"　└─ {formatted_pages}")
             
             # 年份與月份
             if ref.get('year'):

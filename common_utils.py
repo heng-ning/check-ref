@@ -34,20 +34,21 @@ def extract_doi(text):
         clean_doi = clean_doi.rstrip('。.,;')
         return clean_doi
     
-    # 方法2：處理 "https://doi.org/10.xxxx" 格式（關鍵修正）
-    doi_start = re.search(r'https?://doi\.org/', text, re.IGNORECASE)
+    # 方法2：處理 "https://doi.org/10.xxxx" 格式（允許 https:// 和 doi.org/ 之間有空格）
+    doi_start = re.search(r'https?:\s*//\s*doi\.org/', text, re.IGNORECASE)
     if doi_start:
         # 從 doi.org/ 後面開始抓取
         after_prefix = text[doi_start.end():]
         
-        # 策略：從 10. 開始，一直抓到遇到「明確的結束標記」為止
-        # 明確的結束標記：連續兩個換行、句號+空格+大寫字母、或文末
+        # 策略：從 10. 開始，積極抓取直到遇到明確的結束標記
+        # 明確的結束標記：
+        # 1. 連續兩個換行（段落分隔）
+        # 2. 句號+換行+大寫字母開頭的新句子
+        # 3. 新的文獻開始（作者格式：Last, F.）
         
-        # 先找到 DOI 的結束位置
         end_markers = [
-            r'\n\s*\n',           # 兩個換行（段落分隔）
-            r'\.\s+[A-Z]',        # 句號+空格+大寫（下一句開始）
-            r'[。，]\s',          # 中文標點+空格
+            r'\n\s*\n',                          # 兩個換行（段落分隔）
+            r'\.\s*\n\s*[A-Z][a-z]+,\s+[A-Z]\.', # 句號+換行+新文獻作者
         ]
         
         end_pos = len(after_prefix)
@@ -56,22 +57,18 @@ def extract_doi(text):
             if match and match.start() < end_pos:
                 end_pos = match.start()
         
-        # 提取 DOI 內容（可能包含空格、換行）
+        # 提取 DOI 內容（可能包含空格、換行、句號內的斷行）
         doi_content = after_prefix[:end_pos]
         
-        # 清理：只保留 10.xxxx/xxxx 部分
-        # 允許數字、字母、點、斜線、連字號，以及中間的空格
-        doi_pattern = re.match(r'(10\.\S+(?:\s+\S+)*?)(?=\s*$)', doi_content)
-        if doi_pattern:
-            raw_doi = doi_pattern.group(1)
-            # 移除所有空白字元
-            clean_doi = re.sub(r'\s+', '', raw_doi)
-            # 移除結尾的標點
-            clean_doi = clean_doi.rstrip('。.,;')
-            
-            # 最終驗證：確保格式正確 (10.xxxx/xxxx)
-            if re.match(r'10\.\d{4,}/.+', clean_doi):
-                return clean_doi
+        # 清理：移除所有空白字元（包括換行），保留 DOI 結構
+        clean_doi = re.sub(r'\s+', '', doi_content)
+        
+        # 移除結尾的標點
+        clean_doi = clean_doi.rstrip('。.,;')
+        
+        # 最終驗證：確保格式正確 (10.xxxx/xxxx)
+        if re.match(r'10\.\d{4,}/.+', clean_doi):
+            return clean_doi
     
     return None
 

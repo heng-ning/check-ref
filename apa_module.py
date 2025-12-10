@@ -1,3 +1,12 @@
+def format_pages_display(pages):
+    """格式化頁碼顯示：如果包含字母就不加 pp."""
+    if not pages:
+        return None
+    if re.search(r'[A-Za-z]', pages):
+        return pages  # S27–S31
+    else:
+        return f"pp. {pages}"  # pp. 123-456
+
 # ===== 英文 APA =====
 def parse_apa_authors_en(author_str):
     if not author_str: return []
@@ -77,6 +86,11 @@ def extract_apa_en_detailed(ref_text):
         clean_url = clean_url.rstrip('.')
         
         result['url'] = clean_url
+
+        # 如果 URL 是 DOI 連結，清空 URL 欄位
+        if re.match(r'^https?://doi\.org/', clean_url, re.IGNORECASE):
+            result['url'] = None
+
         # 保留 url_match 供後續使用
         url_match = type('obj', (object,), {'group': lambda self, n: raw_url if n == 0 else None})()
     else:
@@ -135,29 +149,43 @@ def extract_apa_en_detailed(ref_text):
 
     # 提取後設資料 (卷期頁碼/文章編號)
     # 格式 1: Journal, Vol(Issue), pages. 例如：Journal, 14(2), 123-456.
-    meta_match = re.search(r',\s*(\d+)(?:\s*\((\d+)\))?,\s*([\d\–\-]+)(?:\.|\s|$)', content_part)
+    # 格式 2: Journal, Vol(Issue), article_number. 例如：Journal, 13(11), 6474.
+    # 格式 3: Journal, Vol. 例如：Journal, 160.
+    meta_match = re.search(
+        r',\s*(\d+)(?:\s*\((\d+)\))?(?:,\s*([A-Za-z]?\d+(?:[\–\-][A-Za-z]?\d+)?))?(?:\.|\s|$)', 
+        content_part
+    )
 
     if meta_match:
         result['volume'] = meta_match.group(1)
-        result['issue'] = meta_match.group(2)
+        result['issue'] = meta_match.group(2) if meta_match.group(2) else None
         pages_or_article = meta_match.group(3)
         
         # 判斷是頁碼還是文章編號
-        # 文章編號通常是純數字（如 100571），頁碼有連字號（如 123-456）
-        if '-' in pages_or_article or '–' in pages_or_article:
-            result['pages'] = pages_or_article
-        else:
-            # 純數字，可能是文章編號
-            if len(pages_or_article) >= 5:  # 文章編號通常較長
-                result['article_number'] = pages_or_article
+        if pages_or_article and pages_or_article.strip():
+            # 如果包含連字號（- 或 –），一定是頁碼
+            if '-' in pages_or_article or '–' in pages_or_article:
+                result['pages'] = pages_or_article
             else:
-                result['pages'] = pages_or_article  # 短數字可能還是頁碼
+                # 純數字或帶字母前綴的數字，判斷是文章編號還是頁碼
+                # 邏輯：4 位數以上通常是文章編號（如 6474），3 位數以下可能是頁碼
+                if pages_or_article.isdigit():
+                    if len(pages_or_article) >= 4:  # 4 位數以上 → 文章編號
+                        result['article_number'] = pages_or_article
+                    else:  # 3 位數以下 → 可能是單頁頁碼
+                        result['pages'] = pages_or_article
+                else:
+                    # 帶字母的（如 S27）→ 可能是頁碼或文章編號
+                    # 簡單判斷：帶字母的短數字視為頁碼
+                    if len(pages_or_article) <= 4:
+                        result['pages'] = pages_or_article
+                    else:
+                        result['article_number'] = pages_or_article
         
         title_source_part = content_part[:meta_match.start()].strip()
-
     else:
-        # 格式 2: 傳統頁碼格式 pp. 123-456
-        pp_match = re.search(r',?\s*pp?\.?\s*([\d\–\-]+)(?:\.)?$', content_part)
+        # 格式 2: 傳統頁碼格式 pp. 123-456 或 pp. S27–S31
+        pp_match = re.search(r',?\s*pp?\.?\s*([A-Za-z]?\d+[\–\-][A-Za-z]?\d+)(?:\.)?$', content_part)
         if pp_match:
             result['pages'] = pp_match.group(1)
             title_source_part = content_part[:pp_match.start()].strip()
@@ -624,7 +652,6 @@ def convert_zh_num_to_apa(data):
     if data.get('title'): parts.append(data['title'])
     if data.get('source'): parts.append(f"《{data['source']}》")
     return "。".join(parts) + "。"
-
 
 # ===== 核心整合 =====
 def process_single_reference(ref_text):
