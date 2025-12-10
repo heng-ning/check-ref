@@ -149,8 +149,8 @@ def display_reference_with_details(ref, index, format_type='IEEE'):
             authors_data = ref.get('authors')
             if authors_data:
                 st.markdown(f"**👥 作者**")
-                if ref.get('parsed_authors'):
-                    # IEEE 格式的解析作者
+                # IEEE 格式才使用 parsed_authors（名 姓）
+                if format_type == 'IEEE' and ref.get('parsed_authors'):
                     auth_list = [f"{a.get('first', '')} {a.get('last', '')}".strip() for a in ref['parsed_authors']]
                     st.markdown(f"　└─ {', '.join(auth_list)}")
                 elif isinstance(authors_data, list):
@@ -180,15 +180,22 @@ def display_reference_with_details(ref, index, format_type='IEEE'):
                 st.markdown(f"　└─ {ref['editors']}")
             
             # 來源（會議、期刊、出版社）
-            source_show = (ref.get('conference_name') or 
-                          ref.get('journal_name') or 
-                          ref.get('source') or 
-                          ref.get('publisher'))
+            # 根據格式顯示不同欄位，但保持相同順序
+            if format_type == 'IEEE':
+                source_show = (ref.get('conference_name') or 
+                            ref.get('journal_name') or 
+                            ref.get('source'))
+            else:  # APA
+                source_show = (ref.get('source') or 
+                            ref.get('publisher'))
+
             if source_show:
                 if ref.get('conference_name'):
                     label = "會議名稱"
-                elif ref.get('journal_name') or ref.get('source'):
+                elif ref.get('journal_name'):
                     label = "期刊名稱"
+                elif ref.get('source'):
+                    label = "期刊名稱" if format_type == 'IEEE' else "期刊名稱"
                 elif ref.get('publisher'):
                     label = "出版社"
                 else:
