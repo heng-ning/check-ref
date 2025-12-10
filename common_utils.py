@@ -1,3 +1,9 @@
+# 引入：
+import re
+import unicodedata
+from docx import Document
+import fitz  # PyMuPDF
+
 # ===== 文字正規化工具 =====
 def normalize_text(text):
     """正規化文字：全形轉半形、清理各種空白與控制符"""
@@ -19,6 +25,23 @@ def normalize_citation_for_matching(citation):
     text = text.replace('（', '(').replace('）', ')')
     text = text.replace('【', '[').replace('】', ']')
     return text.lower()
+
+
+def normalize_chinese_text(text):
+    """
+    將中文文獻常見的全形標點與關鍵字，轉換為程式易於解析的通用格式
+    """
+    # 1. 標點符號標準化
+    text = text.replace('，', ', ').replace('：', ': ').replace('；', '; ')
+    text = text.replace('。', '. ').replace('（', '(').replace('）', ')')
+    text = text.replace('「', '“').replace('」', '”')
+    text = text.replace('、', ', ') # 作者分隔
+    
+    # 2. 關鍵字標準化 (方便 regex 統一抓取)
+    # 將 "第xx卷" 轉為 "Vol. xx" 的形式讓後續邏輯通用，或者保留中文但在 regex 擴充
+    # 這裡我們選擇保留中文關鍵字，但在主程式 regex 中擴充，比較安全
+    
+    return text.strip()
 
 def has_chinese(text):
     """[NEW] 判斷字串是否包含中文字元"""
@@ -288,8 +311,3 @@ def extract_in_text_citations(content_paragraphs):
             citation_ids.add(citation_id)
     return citations
 
-# 引入：
-import re
-import unicodedata
-from docx import Document
-import fitz  # PyMuPDF
