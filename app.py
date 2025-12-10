@@ -113,6 +113,152 @@ with st.sidebar:
         st.success("已清空所有暫存資料")
         st.rerun()
 
+def display_reference_with_details(ref, index, format_type='IEEE'):
+    """ 統一顯示參考文獻的詳細資訊 """
+    title_text = ref.get('title', '未提供標題')
+    ref_num = ref.get('ref_number', str(index))
+    
+    # 根據來源類型決定圖示
+    stype = ref.get('source_type') or ''
+    doc_type = ref.get('document_type') or ''
+    lang = ref.get('lang', 'EN')
+    
+    # 智慧圖示選擇
+    if 'Conference' in stype or 'Conference' in doc_type:
+        icon = '🗣️'
+    elif 'Journal' in stype or 'Journal' in doc_type or ref.get('source'):
+        icon = '📚'
+    elif 'Thesis' in stype or 'Thesis' in doc_type:
+        icon = '🎓'
+    elif 'Website' in stype or ref.get('url'):
+        icon = '🌐'
+    elif 'Book' in stype or 'Book' in doc_type or ref.get('book_title'):
+        icon = '📖'
+    elif 'Patent' in stype:
+        icon = '💡'
+    elif 'Report' in stype:
+        icon = '📄'
+    else:
+        icon = '📄'
+    
+    with st.expander(f"{icon} [{ref_num}] {title_text}", expanded=False):
+        c_info, c_action = st.columns([3, 1])
+        
+        with c_info:
+            # 作者
+            authors_data = ref.get('authors')
+            if authors_data:
+                st.markdown(f"**👥 作者**")
+                if ref.get('parsed_authors'):
+                    # IEEE 格式的解析作者
+                    auth_list = [f"{a.get('first', '')} {a.get('last', '')}".strip() for a in ref['parsed_authors']]
+                    st.markdown(f"　└─ {', '.join(auth_list)}")
+                elif isinstance(authors_data, list):
+                    # APA 格式的作者列表
+                    if lang == 'ZH':
+                        author_display = "、".join(authors_data)
+                    else:
+                        author_display = ", ".join(authors_data)
+                    st.markdown(f"　└─ {author_display}")
+                else:
+                    # 字串格式作者
+                    st.markdown(f"　└─ {authors_data}")
+            
+            # 標題
+            if ref.get('title'):
+                st.markdown(f"**📝 標題**")
+                st.markdown(f"　└─ {ref['title']}")
+            
+            # 書名（若為書籍章節）
+            if ref.get('book_title'):
+                st.markdown(f"**📚 書名**")
+                st.markdown(f"　└─ {ref['book_title']}")
+            
+            # 編輯
+            if ref.get('editors'):
+                st.markdown(f"**✍️ 編輯**")
+                st.markdown(f"　└─ {ref['editors']}")
+            
+            # 來源（會議、期刊、出版社）
+            source_show = (ref.get('conference_name') or 
+                          ref.get('journal_name') or 
+                          ref.get('source') or 
+                          ref.get('publisher'))
+            if source_show:
+                if ref.get('conference_name'):
+                    label = "會議名稱"
+                elif ref.get('journal_name') or ref.get('source'):
+                    label = "期刊名稱"
+                elif ref.get('publisher'):
+                    label = "出版社"
+                else:
+                    label = "來源出處"
+                st.markdown(f"**📖 {label}**")
+                st.markdown(f"　└─ {source_show}")
+            
+            # 卷期
+            if ref.get('volume') or ref.get('issue'):
+                vol_str = f"Vol. {ref['volume']}" if ref.get('volume') else ""
+                issue_str = f"No. {ref['issue']}" if ref.get('issue') else ""
+                vi_display = ", ".join(filter(None, [vol_str, issue_str]))
+                st.markdown(f"**📊 卷期**")
+                st.markdown(f"　└─ {vi_display}")
+            
+            # 頁碼/文章編號
+            if ref.get('article_number'):
+                st.markdown(f"**📄 文章編號**")
+                st.markdown(f"　└─ {ref['article_number']}")
+            elif ref.get('pages'):
+                st.markdown(f"**📄 頁碼**")
+                st.markdown(f"　└─ pp. {ref['pages']}")
+            
+            # 年份與月份
+            if ref.get('year'):
+                date_str = ref['year']
+                if ref.get('month'):
+                    date_str = f"{ref['month']} {date_str}"
+                st.markdown(f"**📅 年份**")
+                st.markdown(f"　└─ {date_str}")
+            
+            # 文件類型
+            if ref.get('document_type'):
+                st.markdown(f"**📂 文件類型**")
+                st.markdown(f"　└─ {ref['document_type']}")
+            
+            # 電子資源
+            if ref.get('doi'):
+                st.markdown(f"**🔍 DOI**")
+                st.markdown(f"　└─ [{ref['doi']}](https://doi.org/{ref['doi']})")
+            
+            if ref.get('url'):
+                st.markdown(f"**🌐 URL**")
+                st.markdown(f"　└─ [{ref['url']}]({ref['url']})")
+            
+            # 原文
+            st.divider()
+            st.caption("📍 原始參考文獻文字")
+            st.code(ref['original'], language=None)
+        
+        with c_action:
+            st.markdown("**🛠️ 操作**")
+            
+            # 根據格式顯示不同的轉換按鈕
+            if format_type == 'IEEE':
+                if st.button("轉 APA", key=f"ref_to_apa_{index}"):
+                    st.code(convert_en_ieee_to_apa(ref), language='text')
+            
+            elif format_type == 'APA':
+                if lang == 'EN':
+                    if st.button("轉 IEEE", key=f"ref_to_ieee_{index}"):
+                        st.code(convert_en_apa_to_ieee(ref), language='text')
+                elif lang == 'ZH':
+                    fmt = ref.get('format', '')
+                    if 'APA' in fmt:
+                        if st.button("轉編號", key=f"ref_to_num_{index}"):
+                            st.code(convert_zh_apa_to_num(ref), language='text')
+                    elif 'Numbered' in fmt:
+                        if st.button("轉 APA", key=f"ref_to_apa_{index}"):
+                            st.code(convert_zh_num_to_apa(ref), language='text')
 
 # ==================== 主區域：檔案上傳 ====================
 
@@ -366,199 +512,29 @@ elif uploaded_file:
         
         st.markdown("---")
         
-        # ==================== IEEE 參考文獻展示 ====================
-        
-        st.markdown("### 📖 參考文獻詳細解析")
+        # IEEE 參考文獻展示
+        st.markdown("### 📖 IEEE 格式參考文獻")
         ieee_list = [ref for ref in parsed_refs if 'IEEE' in ref.get('format', '')]
-        
+
         if ieee_list:
             st.info(f"共找到 {len(ieee_list)} 筆 IEEE 格式參考文獻")
-            
             for i, ref in enumerate(ieee_list, 1):
-                title_text = ref.get('title', '未提供標題')
-                ref_num = ref.get('ref_number', str(i))
-                
-                # 根據 source_type 決定圖示
-                stype = ref.get('source_type', 'Unknown')
-                if 'Conference' in stype:
-                    icon = '🗣️'
-                elif 'Journal' in stype:
-                    icon = '📚'
-                elif 'Thesis' in stype:
-                    icon = '🎓'
-                elif 'Website' in stype:
-                    icon = '🌐'
-                elif 'Book' in stype:
-                    icon = '📖'
-                elif 'Patent' in stype:
-                    icon = '💡'
-                elif 'Report' in stype:
-                    icon = '📄'
-                else:
-                    icon = '📄'
-                
-                with st.expander(f"[{ref_num}] {title_text}", expanded=False):
-                    c_info, c_action = st.columns([3, 1])
-                    
-                    with c_info:
-                        # 作者
-                        if ref.get('authors'):
-                            st.markdown(f"**👥 作者**")
-                            if ref.get('parsed_authors'):
-                                auth_list = [f"{a.get('first', '')} {a.get('last', '')}".strip() for a in ref['parsed_authors']]
-                                st.markdown(f"　└─ {', '.join(auth_list)}")
-                            else:
-                                st.markdown(f"　└─ {ref['authors']}")
-                        
-                        # 標題
-                        if ref.get('title'):
-                            st.markdown(f"**📝 標題**")
-                            st.markdown(f"　└─ {ref['title']}")
-                        
-                        # 來源
-                        source_show = ref.get('conference_name') or ref.get('journal_name') or ref.get('source')
-                        if source_show:
-                            label = "會議名稱" if ref.get('conference_name') else ("期刊名稱" if ref.get('journal_name') else "來源出處")
-                            st.markdown(f"**📖 {label}**")
-                            st.markdown(f"　└─ {source_show}")
-                        
-                        # 卷期與頁碼
-                        if ref.get('volume') or ref.get('issue'):
-                            vol_str = f"Vol. {ref['volume']}" if ref.get('volume') else ""
-                            issue_str = f"No. {ref['issue']}" if ref.get('issue') else ""
-                            vi_display = ", ".join(filter(None, [vol_str, issue_str]))
-                            st.markdown(f"**📊 卷期**")
-                            st.markdown(f"　└─ {vi_display}")
-                        
-                        if ref.get('pages'):
-                            st.markdown(f"**📄 頁碼**")
-                            st.markdown(f"　└─ pp. {ref['pages']}")
-                        
-                        # 年份與月份
-                        if ref.get('year'):
-                            date_str = ref['year']
-                            if ref.get('month'):
-                                date_str = f"{ref['month']} {date_str}"
-                            st.markdown(f"**📅 年份**")
-                            st.markdown(f"　└─ {date_str}")
-                        
-                        # 電子資源
-                        if ref.get('doi'):
-                            st.markdown(f"**🔍 DOI**")
-                            st.markdown(f"　└─ [{ref['doi']}](https://doi.org/{ref['doi']})")
-                        
-                        if ref.get('url'):
-                            st.markdown(f"**🌐 URL**")
-                            st.markdown(f"　└─ [{ref['url']}]({ref['url']})")
-                        
-                        # 原文
-                        st.divider()
-                        st.caption("📍 原始參考文獻文字")
-                        st.code(ref['original'], language=None)
-                    
-                    with c_action:
-                        st.markdown("**🛠️ 操作**")
-                        if st.button("轉 APA", key=f"ieee_btn_apa_{i}"):
-                            st.code(convert_en_ieee_to_apa(ref), language='text')
-        
+                display_reference_with_details(ref, i, format_type='IEEE')
+        else:
+            st.info("無 IEEE 格式參考文獻")
+
         st.markdown("---")
-        
-        # ==================== APA 參考文獻展示 ====================
-        
+
+        # APA 參考文獻展示
         st.markdown("### 📚 APA 與其他格式參考文獻")
         apa_list = [ref for ref in parsed_refs if 'APA' in ref.get('format', '') or 'Numbered' in ref.get('format', '')]
-        
-        with st.expander("📋 查看 APA / 中文格式完整資訊"):
-            for i, ref in enumerate(apa_list, 1):
-                fmt = ref.get('format')
-                title_display = ref.get('title') or "無標題"
-                
-                st.markdown(f"### {i}. [{fmt}]")
-                
-                c_info, c_action = st.columns([3, 1])
-                
-                with c_info:
-                    # 作者處理
-                    authors_data = ref.get('authors')
-                    if isinstance(authors_data, list):
-                        if ref.get('lang') == 'ZH':
-                            author_display = "、".join(authors_data)
-                        else:
-                            author_display = ", ".join(authors_data)
-                    else:
-                        author_display = authors_data or "Unknown"
-                    
-                    st.markdown(f"**📝 作者**：{author_display}")
-                    st.markdown(f"**📄 標題**：{title_display}")
-                    
-                    # 年份與月份
-                    year_display = ref.get('year', 'Unknown')
-                    if ref.get('month'):
-                        year_display = f"{ref['year']} ({ref['month']})"
-                    st.markdown(f"**📅 年份**：{year_display}")
-                    
-                    # 來源/出版社
-                    if ref.get('publisher'):
-                        st.markdown(f"**🏢 出版社**：{ref['publisher']}")
-                    elif ref.get('source'):
-                        st.markdown(f"**📖 期刊/來源**：{ref.get('source')}")
-                    
-                    # 卷期
-                    pub_info = []
-                    if ref.get('volume'):
-                        pub_info.append(f"Vol. {ref['volume']}")
-                    if ref.get('issue'):
-                        pub_info.append(f"No. {ref['issue']}")
-                    if pub_info:
-                        st.markdown(f"**📊 卷期**：{', '.join(pub_info)}")
-                    
-                    # 編輯與書名
-                    if ref.get('editors'):
-                        st.markdown(f"**✍️ 編輯**：{ref['editors']}")
-                    if ref.get('book_title'):
-                        st.markdown(f"**📚 書名**：{ref['book_title']}")
-                    
-                    if ref.get('document_type'):
-                        st.markdown(f"**📂 文件類型**：{ref['document_type']}")
-                    
-                    # 頁碼/文章編號
-                    if ref.get('article_number'):
-                        st.markdown(f"**📄 文章編號**：{ref['article_number']}")
-                    elif ref.get('pages'):
-                        st.markdown(f"**📄 頁碼**：{ref['pages']}")
-                    
-                    # DOI/URL
-                    if ref.get('doi'):
-                        st.markdown(f"**🔍 DOI**：[{ref['doi']}](https://doi.org/{ref['doi']})")
-                    elif ref.get('url'):
-                        st.markdown(f"**🌐 URL**：[{ref['url']}]({ref['url']})")
-                    
-                    st.text_area(
-                        label="原文",
-                        value=ref['original'],
-                        height=80,
-                        key=f"apa_orig_{i}",
-                        disabled=True
-                    )
-                
-                with c_action:
-                    st.markdown("**🛠️ 格式轉換**")
-                    if ref.get('lang') == 'EN':
-                        if st.button("轉 IEEE", key=f"apa_btn_ieee_{i}"):
-                            st.code(convert_en_apa_to_ieee(ref), language='text')
-                    elif ref.get('lang') == 'ZH':
-                        if 'APA' in fmt:
-                            if st.button("轉編號", key=f"zh_btn_num_{i}"):
-                                st.code(convert_zh_apa_to_num(ref), language='text')
-                        elif 'Numbered' in fmt:
-                            if st.button("轉 APA", key=f"zh_btn_apa_{i}"):
-                                st.code(convert_zh_num_to_apa(ref), language='text')
-                
-                st.markdown("---")
-    
-    else:
-        st.warning("無參考文獻段落可供分析")
 
+        if apa_list:
+            st.info(f"共找到 {len(apa_list)} 筆 APA / 中文格式參考文獻")
+            for i, ref in enumerate(apa_list, 1):
+                display_reference_with_details(ref, i, format_type='APA')
+        else:
+            st.info("無 APA / 中文格式參考文獻")
 
 st.markdown("---")
 
