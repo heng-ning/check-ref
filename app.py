@@ -524,9 +524,7 @@ elif uploaded_file:
         # IEEE 參考文獻展示
         st.markdown("### 📖 IEEE 格式參考文獻")
         ieee_list = [ref for ref in parsed_refs if 'IEEE' in ref.get('format', '')]
-
         if ieee_list:
-            st.info(f"共找到 {len(ieee_list)} 筆 IEEE 格式參考文獻")
             for i, ref in enumerate(ieee_list, 1):
                 display_reference_with_details(ref, i, format_type='IEEE')
         else:
@@ -537,13 +535,11 @@ elif uploaded_file:
         # APA 參考文獻展示
         st.markdown("### 📚 APA 與其他格式參考文獻")
         apa_list = [ref for ref in parsed_refs if 'APA' in ref.get('format', '') or 'Numbered' in ref.get('format', '')]
-
         if apa_list:
-            st.info(f"共找到 {len(apa_list)} 筆 APA / 中文格式參考文獻")
             for i, ref in enumerate(apa_list, 1):
-                display_reference_with_details(ref, i, format_type='APA')
+                display_reference_with_details(ref, i , format_type='APA') 
         else:
-            st.info("無 APA / 中文格式參考文獻")
+            st.info("無 APA 格式參考文獻")
 
 st.markdown("---")
 

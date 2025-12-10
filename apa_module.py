@@ -655,23 +655,28 @@ def convert_zh_num_to_apa(data):
 
 # ===== 核心整合 =====
 def process_single_reference(ref_text):
-    """[NEW] 核心分流邏輯，根據語言和特徵選擇解析器"""
+    """
+    [Updated] 核心分流邏輯
+    策略：優先判斷是否為編號格式 ([1]...), 若是則一律交給 IEEE 模組 (中英文通用)。
+    """
     ref_text = normalize_text(ref_text)
     
-    if has_chinese(ref_text):
-        if re.match(r'^\s*[\[【]', ref_text):
-            data = extract_numbered_zh_detailed(ref_text)
-        else:
-            data = extract_apa_zh_detailed(ref_text)
+    # 1. 優先判斷：是否為編號格式 ([1], [2], 【1】...)
+    # 只要是編號開頭，不管中英文，全部視為 IEEE 格式
+    if re.match(r'^\s*[\[【]', ref_text):
+        # 呼叫您剛剛更新過、中英文通吃的 IEEE 解析器
+        data = extract_ieee_reference_full(ref_text)
+        # 這個解析器回傳的 data['format'] 預設就是 'IEEE'
+        
     else:
-        if re.match(r'^\s*[\[【]', ref_text):
-            data = extract_ieee_reference_full(ref_text)
+        # 2. 非編號格式 (APA 類)，再根據語言分流
+        if has_chinese(ref_text):
+            data = extract_apa_zh_detailed(ref_text)
         else:
             data = extract_apa_en_detailed(ref_text)
             
-    # [關鍵整合]：確保回傳的字典包含 1204 比對邏輯所需的 'author' (字串) 欄位
+    # [關鍵整合]：確保回傳的字典包含比對邏輯所需的 'author' 欄位
     if isinstance(data.get('authors'), list):
-        # 這裡主要是為了比對邏輯，前端顯示會有專門的處理
         data['author'] = " ".join(data['authors']) 
     elif isinstance(data.get('authors'), str):
         data['author'] = data['authors']
@@ -679,6 +684,7 @@ def process_single_reference(ref_text):
         data['author'] = "Unknown"
         
     return data
+
 
 # 引入：
 import re
