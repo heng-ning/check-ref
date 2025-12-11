@@ -135,46 +135,89 @@ def is_reference_format(text):
     return False
 
 def extract_reference_section_improved(paragraphs):
-    """改進的參考文獻區段識別 (維持原本較強大的邏輯，包含附錄排除)"""
+    """
+    [Enhanced] 參考文獻區段識別
+    解決跨頁重複標題導致截斷的問題
+    """
     reference_keywords = [
         "參考文獻", "參考資料", "references", "reference",
         "bibliography", "works cited", "literature cited",
         "references and citations"
     ]
     
-    def clip_until_stop(paragraphs_after):
-        """截取至附錄為止"""
-        result = []
-        for para in paragraphs_after:
-            if is_appendix_heading(para):
+    # 策略 1: 從後往前找，但找到標題後，要檢查是否為 "最後一個有效的標題"
+    # 或者，如果發現多個標題，且它們之間都是參考文獻格式，則視為連續區塊
+    
+    # 我們先找出所有可能是 "參考文獻標題" 的索引
+    ref_header_indices = []
+    
+    for i, para in enumerate(paragraphs):
+        para = para.strip()
+        if len(para) > 50: continue # 標題通常不長
+        
+        para_norm = normalize_text(para.lower())
+        
+        is_header = False
+        # 1. 關鍵字完全匹配
+        for kw in reference_keywords:
+            if normalize_text(kw) == para_norm:
+                is_header = True
                 break
-            result.append(para)
-        return result
+        
+        # 2. Regex 匹配 (章節標題)
+        if not is_header:
+            pattern = r'^((第?[一二三四五六七八九十百千萬壹貳參肆伍陸柒捌玖拾佰仟萬]+章[、．.︑,，]?)|(\d+|[IVXLCDM]+)?[、．.︑,， ]?)?\s*(參考文獻|參考資料|references?|bibliography)\s*$'
+            if re.match(pattern, para_norm):
+                is_header = True
+        
+        if is_header:
+            ref_header_indices.append(i)
+
+    if not ref_header_indices:
+        return [], None, "未找到參考文獻區段"
+
+    # 策略調整：
+    # 我們取 "第一個" 看起來像是真的開始的標題
+    # 真標題的特徵：後面緊接著 [1] 或 1. 或 APA 格式
     
-    for i in reversed(range(len(paragraphs))):
-        para = paragraphs[i].strip()
-        para_lower = para.lower()
-        para_normalized = normalize_text(para_lower)
-        
-        if len(para) > 50:
-            continue
-        
-        for keyword in reference_keywords:
-            if normalize_text(keyword) == para_normalized:
-                return clip_until_stop(paragraphs[i + 1:]), para, "純標題識別"
-        
-        pattern = r'^((第?[一二三四五六七八九十百千萬壹貳參肆伍陸柒捌玖拾佰仟萬]+章[、．.︑,，]?)|(\d+|[IVXLCDM]+)?[、．.︑,， ]?)?\s*(參考文獻|參考資料|references?|bibliography)\s*$'
-        if re.match(pattern, para_lower):
-            return clip_until_stop(paragraphs[i + 1:]), para, "章節標題識別"
-        
-        fuzzy_keywords = ["reference", "參考", "bibliography"]
-        if any(para_lower.strip() == k for k in fuzzy_keywords):
-            if i + 1 < len(paragraphs):
-                next_paras = paragraphs[i+1:min(i+6, len(paragraphs))]
-                if sum(1 for p in next_paras if is_reference_format(p)) >= 1:
-                    return clip_until_stop(paragraphs[i + 1:]), para.strip(), "內容特徵識別"
+    start_index = -1
+    for idx in ref_header_indices:
+        # 檢查後面 5 行內是否有參考文獻格式
+        check_range = paragraphs[idx+1 : min(idx+6, len(paragraphs))]
+        if any(is_reference_format(p) for p in check_range):
+            start_index = idx
+            break
+            
+    # 如果沒找到明顯特徵，退回使用最後一個找到的標題
+    if start_index == -1:
+        start_index = ref_header_indices[-1]
+
+    # 提取內容，並在過程中過濾掉重複的標題
+    final_refs = []
+    ref_keyword = paragraphs[start_index].strip()
     
-    return [], None, "未找到參考文獻區段"
+    for i in range(start_index + 1, len(paragraphs)):
+        para = paragraphs[i]
+        
+        # 1. 檢查是否為附錄 (停止點)
+        if is_appendix_heading(para):
+            break
+            
+        # 2. 檢查是否為重複出現的參考文獻標題 (跨頁頁眉) -> 跳過
+        # 使用寬鬆匹配
+        para_norm = normalize_text(para.lower().strip())
+        is_duplicate_header = False
+        for kw in reference_keywords:
+            if normalize_text(kw) == para_norm:
+                is_duplicate_header = True
+                break
+        
+        if is_duplicate_header:
+            continue # 跳過這行，繼續抓後面的文獻
+            
+        final_refs.append(para)
+
+    return final_refs, ref_keyword, "改進版跨頁識別"
 
 def extract_reference_section(paragraphs):
     """原本的簡單版本（fallback）"""
@@ -216,22 +259,49 @@ def classify_document_sections(paragraphs):
     ref_paragraphs, ref_keyword, method = extract_reference_section_improved(paragraphs)
     
     if not ref_paragraphs:
-        ref_paragraphs, ref_keyword, _ = extract_reference_section(paragraphs)
-        if not ref_paragraphs:
-            return paragraphs, [], None, None
+        # Fallback (很少用到，但保留保險)
+        return paragraphs, [], None, None
     
-    ref_start_index = None
+    # 反推開始位置 (因為 extract_reference_section_improved 邏輯變複雜了，不能簡單用 index)
+    # 我們假設內容段落就是全部減去參考文獻部分
+    # 但要注意，因為我們過濾掉了中間的重複標題，所以長度對不上
+    
+    # 簡單做法：找到 ref_keyword 第一次出現的位置 (start_index)
+    # 在 extract_reference_section_improved 裡其實已經算過 start_index
+    # 為了效能，這裡重新掃描一次 start_index 應該還好
+    
+    # 這裡有點小問題，因為我們不知道 improved 函式選了哪個 index
+    # 讓我們修改 improved 函式讓它回傳 index 會更好，但為了不更動太多介面：
+    
+    # 重新尋找最佳切分點
+    best_index = len(paragraphs) # Default to end
+    
+    # 使用與 improved 相同的邏輯找 start_index
+    reference_keywords = [
+        "參考文獻", "參考資料", "references", "reference",
+        "bibliography", "works cited", "literature cited",
+        "references and citations"
+    ]
+    
     for i, para in enumerate(paragraphs):
-        if para.strip() == ref_keyword:
-            ref_start_index = i
-            break
+        para_norm = normalize_text(para.lower().strip())
+        is_header = False
+        for kw in reference_keywords:
+            if normalize_text(kw) == para_norm:
+                is_header = True; break
+        if not is_header and re.match(r'^((第?[一]+章)|(\d+))?[、．. ]?\s*(參考文獻|references?)\s*$', para_norm):
+            is_header = True
+            
+        if is_header:
+            # 驗證
+            check_range = paragraphs[i+1 : min(i+6, len(paragraphs))]
+            if any(is_reference_format(p) for p in check_range):
+                best_index = i
+                break
+                
+    content_paragraphs = paragraphs[:best_index]
     
-    if ref_start_index is None:
-        # Fallback if keyword index not found exactly
-        ref_start_index = len(paragraphs) - len(ref_paragraphs)
-    
-    content_paragraphs = paragraphs[:ref_start_index]
-    return content_paragraphs, ref_paragraphs, ref_start_index, ref_keyword
+    return content_paragraphs, ref_paragraphs, best_index, ref_keyword
 
 ## 內文引用擷取
 def extract_in_text_citations(content_paragraphs):

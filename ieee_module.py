@@ -47,12 +47,7 @@ def parse_ieee_authors(authors_str):
 
 # ===== IEEE 完整解析 =====
 def extract_ieee_reference_full(ref_text):
-    """
-    [Final Hybrid Version] 
-    1. 中文：使用靈活分割邏輯 (支援商周、論文等特殊格式)。
-    2. 英文：嚴格保留原始邏輯 (包含 Ethereum, arXiv 等修復)。
-    """
-    
+
     # === 0. 基礎預處理 ===
     original_ref_text = ref_text
     # 為了讓 Regex 能處理中文標點，先做標準化
@@ -85,13 +80,38 @@ def extract_ieee_reference_full(ref_text):
         'degree': None,
         'original': original_ref_text
     }
-    
+
     # 1. 提取編號 [1]
-    number_match = re.match(r'^\s*[\[【]\s*(\d+)\s*[\]】]\s*', ref_text)
+    number_match = re.match(r'^\s*(?:[\[【\(]?\s*(\d+)\s*[\]】\)\.]?)\.?\s+', ref_text)
+    
     if not number_match: return result 
     
     result['ref_number'] = number_match.group(1)
     rest_text = ref_text[number_match.end():].strip()
+    
+    # === 通用清理函式  ===
+    def clean_source_text(text):
+        if not text: return None
+        
+        # 1. 清理開頭的連接詞與標記 (in, 收錄於, J., [J] 等)
+        text = re.sub(r'^in(?:[:\s]+|$)', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'^(?:收錄於|載於|刊於)[:\s]*', '', text)
+        text = re.sub(r'^J\.\s+', '', text)
+        text = re.sub(r'\[[JCD]\]', '', text) # 移除 [J], [C], [D] 等分類標記
+        
+        # 2. 移除電子資源標記 ([Online], Available, Retrieved)
+        text = re.sub(r'\[Online\]\.?', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'Available:', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'Retrieved from', '', text, flags=re.IGNORECASE)
+        
+        # 3. 移除存取日期 (accessed ...)
+        text = re.sub(r'\(?\s*accessed\.?.*', '', text, flags=re.IGNORECASE)
+        
+        # 4. 移除網址殘留 (https://...)
+        text = re.sub(r'https?://[^\s]+', '', text)
+        
+        # 5. 最終修剪標點與空白
+        return text.strip().strip(',. -;，。')
     
     # === 分流判斷：如果是中文文獻，走新邏輯；如果是英文，走舊邏輯 ===
     if has_chinese(rest_text):
@@ -125,7 +145,7 @@ def extract_ieee_reference_full(ref_text):
         # 優先找引號 (IEEE 標準中文)
         quote_match = re.search(r'["“](.+?)["”]', rest_text)
         if quote_match:
-            result['title'] = quote_match.group(1).strip()
+            result['title'] = quote_match.group(1).strip().rstrip('.,;，。、')
             before_quote = rest_text[:quote_match.start()].strip().rstrip(',.，。 ')
             if before_quote:
                 result['authors'] = before_quote
@@ -135,14 +155,18 @@ def extract_ieee_reference_full(ref_text):
             # 清理已提取的年份/URL
             if result['year']: after_quote = after_quote.replace(result['year'], '').strip().rstrip(',.，。 ')
             if result['url']: after_quote = after_quote.replace(result['url'], '').strip()
-            if after_quote: result['source'] = after_quote
+            
+            cleaned_source = clean_source_text(after_quote)
+            if cleaned_source: result['source'] = cleaned_source
         else:
             # 無引號 (靈活分割：作者, 標題, 來源)
             clean_rest = rest_text
             if result['url']: clean_rest = clean_rest.replace(result['url'], '')
             if result['doi']: clean_rest = clean_rest.replace(result['doi'], '')
             if result['year']: clean_rest = re.sub(r'\b'+result['year']+r'\b', '', clean_rest)
-            
+
+            clean_rest = re.sub(r'\(?\s*accessed\.?.*', '', clean_rest, flags=re.IGNORECASE)
+
             parts = re.split(r'[,，.。]', clean_rest)
             parts = [p.strip() for p in parts if p.strip()]
             
@@ -164,10 +188,8 @@ def extract_ieee_reference_full(ref_text):
             if "大學" in result['source']: result['publisher'] = result['source']
 
     else:
-        # ==========================================
-        #       英文解析邏輯 (保留原始邏輯)
-        # ==========================================
-        
+        #  英文解析邏輯
+
         quote_patterns = [
             (r'"', r'"'), (r'“', r'”'), (r'“', r'“'),  (r'”', r'”'),(r'\'', r'\'')
         ]
@@ -240,11 +262,11 @@ def extract_ieee_reference_full(ref_text):
             eth_split = re.search(r'(Ethereum foundation)\.\s*(.*)', result['title'], re.IGNORECASE)
             author_split = re.search(r'\.\s+([A-Z])', result['title'])
             if eth_split:
-                 result['authors'] = eth_split.group(1).strip()
-                 result['title'] = eth_split.group(2).strip()
+                result['authors'] = eth_split.group(1).strip()
+                result['title'] = eth_split.group(2).strip()
             elif author_split:
-                 result['authors'] = result['title'][:author_split.start()].strip()
-                 result['title'] = result['title'][author_split.start() + 1:].strip()
+                result['authors'] = result['title'][:author_split.start()].strip()
+                result['title'] = result['title'][author_split.start() + 1:].strip()
 
         # === [修正] 全局清理 ===
         after_title = re.sub(r'Authorized licensed use[\s\S]*', '', after_title, flags=re.IGNORECASE)
@@ -315,15 +337,9 @@ def extract_ieee_reference_full(ref_text):
                     break
         
         source_candidate = full_search_text[:min_pos].strip().strip(',. -')
-        
-        clean_source = re.sub(r'^in(?:[:\s]+|$)', '', source_candidate, flags=re.IGNORECASE)
-        clean_source = re.sub(r'^(?:收錄於|載於|刊於)[:\s]*', '', clean_source)
-        clean_source = re.sub(r'\[[JCD]\]', '', clean_source)
-        clean_source = re.sub(r'^J\.\s+', '', clean_source)
-        clean_source = re.sub(r'(?:Retrieved from|Available:|http).*', '', clean_source, flags=re.IGNORECASE)
-        clean_source = re.sub(r'\[Online\]\.?', '', clean_source, flags=re.IGNORECASE).strip().strip(',. -')
-        
-        result['source'] = clean_source
+        clean_source = clean_source_text(source_candidate)
+        if clean_source and not re.match(r'^(http|www)', clean_source, re.IGNORECASE):
+            result['source'] = clean_source
 
         # Source Type
         if re.search(r'(Proc\.|Proceedings|Conference|Symposium|Workshop)', full_search_text, re.IGNORECASE):

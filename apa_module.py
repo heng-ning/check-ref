@@ -663,6 +663,7 @@ def process_single_reference(ref_text):
     
     # 1. 優先判斷：是否為編號格式 ([1], [2], 【1】...)
     # 只要是編號開頭，不管中英文，全部視為 IEEE 格式
+    
     if re.match(r'^\s*[\[【]', ref_text):
         # 呼叫您剛剛更新過、中英文通吃的 IEEE 解析器
         data = extract_ieee_reference_full(ref_text)
