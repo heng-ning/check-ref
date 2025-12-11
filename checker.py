@@ -1,3 +1,4 @@
+import re
 # ===== 交叉比對 =====
 def check_references(in_text_citations, reference_list):
     """
@@ -13,7 +14,7 @@ def check_references(in_text_citations, reference_list):
         # 1. 轉小寫
         name = str(name).lower()
         # 2. 移除常見綴詞，避免干擾
-        for junk in ['et al.', 'et al', 'and', '&', ',']:
+        for junk in ['et al.', 'et al', 'and', '&', ',','與', '和', '及']:
             name = name.replace(junk, ' ')
         # 3. 只取第一個單字 (通常就是姓氏)
         parts = name.split()

@@ -273,6 +273,44 @@ def extract_in_text_citations(content_paragraphs):
     for match in pattern_apa2.finditer(full_text):
         author = match.group(1).strip()
         year = match.group(2)[:4]
+        # ========== [新增修正邏輯 START] ==========
+        # 定義雜訊詞清單 (常用的學術連接詞)
+        junk_prefixes = [
+            # 5字以上
+            '本研究不僅再次驗證', '這些觀點皆與', 
+            
+            # 4字
+            '本研究採用', '此點亦與', 
+            
+            # 3字
+            '而這與', '本研究', '也支持', '而在與', '這顯示',
+            
+            # 2字
+            '根據', '依據', '參見', '參照', '此與', '亦與', '而這',
+            '顯示', '指出', '發現', '認為', '以及', '至於', '反觀',
+            
+            # 1字 (最後才檢查單字)
+            '如', '由', '採', '而', '與', '和', '及', '對', '故', 
+            '經', '至', '則', '並', '但', '這'
+        ]
+        
+        clean_author = author
+        
+        # 1. 迴圈清洗：移除開頭的雜訊詞
+        keep_cleaning = True
+        while keep_cleaning:
+            keep_cleaning = False
+            for prefix in junk_prefixes:
+                if clean_author.startswith(prefix):
+                    # 保護機制：確保移除後還有剩餘文字 (避免把姓氏 "與" 或 "嚴" 刪光)
+                    if len(clean_author) > len(prefix):
+                        clean_author = clean_author[len(prefix):].strip()
+                        keep_cleaning = True 
+                    break
+        
+        author = clean_author
+        # ========== [新增修正邏輯 END] ============
+
         # 排除作者全為數字
         if author.isdigit():
             continue
