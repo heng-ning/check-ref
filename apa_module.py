@@ -289,20 +289,66 @@ def extract_apa_zh_detailed(ref_text):
         'format': 'APA (ZH)', 'lang': 'ZH',
         'authors': [], 'year': None, 'title': None, 'source': None,
         'volume': None, 'issue': None, 'pages': None,
+        'url': None,
         'doi': None, 'original': ref_text
     }
     result['doi'] = extract_doi(ref_text)
+
+    # 提取 URL
+    url_match = re.search(r'https?://[^\s。]+', ref_text)
+    if url_match:
+        raw_url = url_match.group(0)
+        result['url'] = raw_url.rstrip('。.')
+        # 從 ref_text 中移除 URL，避免污染後續解析
+        ref_text = ref_text[:url_match.start()].strip().rstrip('。. ')
+
     year_match = re.search(r'[（(]\s*(\d{2,4})\s*[)）]', ref_text)
-    if not year_match: return result
+    if not year_match: 
+        # 無作者的特殊格式處理 (如政府文件)
+        special_match = re.search(r'(.+?)[（(](\d{4})\s*年.+?[)）]', ref_text)
+        if special_match:
+            result['title'] = special_match.group(1).strip()
+            result['year'] = special_match.group(2)
+            result['authors'] = []
+            
+            # 提取 URL
+            url_match = re.search(r'https?://[^\s]+', ref_text)
+            if url_match:
+                result['url'] = url_match.group(0).rstrip('。.')
+            
+            return result
+        return result
     
     result['year'] = year_match.group(1)
     author_part = ref_text[:year_match.start()].strip()
     result['authors'] = parse_chinese_authors(author_part)
     
     rest = ref_text[year_match.end():].strip().lstrip('.。 ')
+
+    # 先嘗試提取卷期頁碼，並從 rest 中移除
+    meta_match = re.search(
+        r'[,，]\s*(\d+)\s*[卷]?\s*(?:[（(](\d+)[)）期]?)?\s*[,，]\s*(\d+)\s*[–\-~]\s*(\d+)',
+        rest
+    )
+    if meta_match:
+        result['volume'] = meta_match.group(1)
+        if meta_match.group(2):
+            result['issue'] = meta_match.group(2)
+        result['pages'] = f"{meta_match.group(3)}–{meta_match.group(4)}"
+        # 移除卷期頁碼部分，並清理結尾的標點
+        rest = rest[:meta_match.start()].strip()
+        rest = rest.rstrip(',，。. ')  # 分開處理，確保徹底清理
+    else:
+        # 只有卷號
+        vol_match = re.search(r'[,，]\s*(\d+)\s*[卷]', rest)
+        if vol_match:
+            result['volume'] = vol_match.group(1)
+            rest = rest[:vol_match.start()].strip().rstrip(',，。. ')
+
     match_book = re.search(r'《([^》]+)》', rest)
     match_article = re.search(r'〈([^〉]+)〉', rest)
     
+    # 提取標題和來源
     if match_article:
         result['title'] = match_article.group(1)
         if match_book: result['source'] = match_book.group(1)
@@ -314,15 +360,22 @@ def extract_apa_zh_detailed(ref_text):
         else:
             result['title'] = match_book.group(1)
     else:
-        # [UPDATED] 增加後備方案，如果沒有書名號，嘗試用句號分隔抓取來源
-        parts = re.split(r'[。.]', rest)
-        # 過濾空字串
-        parts = [p.strip() for p in parts if p.strip()]
-        if len(parts) > 0: result['title'] = parts[0]
-        if len(parts) > 1: result['source'] = parts[1] # 嘗試抓取來源
-            
-    vol_match = re.search(r'(\d+)\s*[卷]', rest)
-    if vol_match: result['volume'] = vol_match.group(1)
+        # 優先用「中文句號」分隔
+        # 避免誤判小數點（如 2.0.）
+        match = re.search(r'。', rest)
+        
+        if match:
+            result['title'] = rest[:match.start()].strip()
+            result['source'] = rest[match.end():].strip().lstrip('。.,，. ').rstrip(',，。. ')
+        else:
+            # 如果沒有中文句號，找「前後都不是數字的英文句號」
+            match_en = re.search(r'(?<!\d)\.(?!\d)', rest)
+            if match_en:
+                result['title'] = rest[:match_en.start()].strip()
+                result['source'] = rest[match_en.end():].strip().lstrip('。.,，. ').rstrip(',，。. ')
+            else:
+                result['title'] = rest.strip()
+
     return result
 
 def extract_numbered_zh_detailed(ref_text):
