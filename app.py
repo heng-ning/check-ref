@@ -263,7 +263,7 @@ def display_reference_with_details(ref, index, format_type='IEEE'):
                 elif lang == 'ZH':
                     fmt = ref.get('format', '')
                     if 'APA' in fmt:
-                        if st.button("轉編號", key=f"ref_to_num_{index}"):
+                        if st.button("轉 IEEE", key=f"ref_to_num_{index}"):
                             st.code(convert_zh_apa_to_num(ref), language='text')
                     elif 'Numbered' in fmt:
                         if st.button("轉 APA", key=f"ref_to_apa_{index}"):
