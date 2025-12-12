@@ -124,25 +124,7 @@ def display_reference_with_details(ref, index, format_type='IEEE'):
     doc_type = ref.get('document_type') or ''
     lang = ref.get('lang', 'EN')
     
-    # 智慧圖示選擇
-    if 'Conference' in stype or 'Conference' in doc_type:
-        icon = '🗣️'
-    elif 'Journal' in stype or 'Journal' in doc_type or ref.get('source'):
-        icon = '📚'
-    elif 'Thesis' in stype or 'Thesis' in doc_type:
-        icon = '🎓'
-    elif 'Website' in stype or ref.get('url'):
-        icon = '🌐'
-    elif 'Book' in stype or 'Book' in doc_type or ref.get('book_title'):
-        icon = '📖'
-    elif 'Patent' in stype:
-        icon = '💡'
-    elif 'Report' in stype:
-        icon = '📄'
-    else:
-        icon = '📄'
-    
-    with st.expander(f"{icon} [{ref_num}] {title_text}", expanded=False):
+    with st.expander(f"[{ref_num}] {title_text}", expanded=False):
         c_info, c_action = st.columns([3, 1])
         
         with c_info:
