@@ -1,6 +1,8 @@
 1.IEEE格式抓取修正 藺宇昕
 2.APA中文內文引用 陳孝宗
 3.APA格式抓取修正 曾姮寧
-4.
+4.有些頁尾會有78-1-6654-3368-6/21/$31.00 ©2021 IEEE
+384
+Authorized licensed use limited to: National Taipei University. Downloaded on November 13,2025 at 03:31:35 UTC from IEEE Xplore.  Restrictions apply. 會被抓到參考文獻裡。
 5.
 6.

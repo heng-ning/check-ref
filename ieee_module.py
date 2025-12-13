@@ -268,6 +268,69 @@ def extract_ieee_reference_full(ref_text):
                 result['authors'] = result['title'][:author_split.start()].strip()
                 result['title'] = result['title'][author_split.start() + 1:].strip()
 
+        # [NEW Fix] URL 提取與絕對截斷邏輯 (取代原本零散的 URL replace)
+        # 1. 嘗試抓取 Markdown 連結 [text](url)
+        # 放寬條件：允許 ] 與 ( 中間有空白
+        md_link_match = re.search(r'\[([^\]]+)\]\s*\((https?://[^\)]+)\)', after_title)
+        
+        if md_link_match:
+            base_url = md_link_match.group(2).strip()
+            md_start_pos = md_link_match.start() # 記錄 Markdown 開始位置
+            md_end_pos = md_link_match.end()     # 記錄 Markdown 結束位置
+            
+            # 從 Markdown 結束的地方往後看
+            rest_part = after_title[md_end_pos:]
+            
+            # 使用 Regex 抓取後續的「碎片」
+            # Regex: 抓取直到遇到逗號或年份 (加入 re.DOTALL 處理換行)
+            fragment_match = re.match(r'^(.*?)(?=[,;]|\s+(?:19|20)\d{2}\b)', rest_part, re.DOTALL)
+            
+            full_url = base_url
+            total_cut_length = 0 # 額外要切掉的長度
+            
+            if fragment_match:
+                fragment = fragment_match.group(1)
+                # 只有當碎片包含斜線(/) 或點號(.) 時才認為它是 URL 的一部分
+                if '/' in fragment or '.pdf' in fragment.lower():
+                    # 拼接 URL (去除空白)
+                    full_url += fragment.replace(' ', '').replace('\n', '')
+                    total_cut_length = len(fragment)
+            
+            result['url'] = full_url
+            
+            # [關鍵動作] 直接切斷字串！
+            # 新的 after_title = Markdown 前面的部分 + (Markdown結束點 + 碎片長度) 後面的部分
+            cut_point = md_end_pos + total_cut_length
+            
+            # 切除中間那段 URL 相關的文字
+            after_title = after_title[:md_start_pos] + " " + after_title[cut_point:]
+            
+            # 移除可能殘留的標點
+            after_title = after_title.replace(' , ', ', ').strip()
+
+        # 2. 如果沒有 Markdown，嘗試直接抓取 .pdf 結尾的 URL (Backup Strategy)
+        elif re.search(r'\.pdf', after_title, re.IGNORECASE):
+             pdf_wide_match = re.search(r'(https?://[\s\S]*?\.pdf)', after_title, re.IGNORECASE)
+             if pdf_wide_match:
+                 raw_url = pdf_wide_match.group(1)
+                 result['url'] = raw_url.replace(' ', '').replace('\n', '')
+                 
+                 # 同樣使用位置截斷
+                 start, end = pdf_wide_match.span()
+                 after_title = after_title[:start] + " " + after_title[end:]
+                 after_title = after_title.strip()
+
+        non_journal_keywords = [
+        "Online document", "Online", "Available", "Retrieved from", 
+        "Accessed on", "Internet", "Web page", "White paper"
+        ]
+    
+        # 檢查 after_title 開頭是否包含這些雜訊
+        for keyword in non_journal_keywords:
+            pattern = r'^[\W_]*' + re.escape(keyword) + r'[\W_]*'
+            if re.match(pattern, after_title, re.IGNORECASE):
+                after_title = re.sub(pattern, '', after_title, flags=re.IGNORECASE).strip()
+        
         # === [修正] 全局清理 ===
         after_title = re.sub(r'Authorized licensed use[\s\S]*', '', after_title, flags=re.IGNORECASE)
         after_title = re.sub(r'Downloaded\s+on[\s\S]*', '', after_title, flags=re.IGNORECASE)
@@ -284,25 +347,54 @@ def extract_ieee_reference_full(ref_text):
         # === [修正] 年份開頭清理 ===
         if result['year']:
             year_start_match = re.match(r'^\s*(?:[\.,]\s*)?[\(\[]?\s*(\d{4})\s*[\)\]]?[\.,]?\s*', after_title)
+            
             if year_start_match and year_start_match.group(1) == result['year']:
-                after_title = after_title[year_start_match.end():].strip()
+                # 取得切除年份後剩下的字串
+                potential_rest = after_title[year_start_match.end():].strip()
+                
+                # 保護機制：如果剩下的字串是以 "25th", "1st" 或 "Conference" 開頭
+                # 代表這個年份其實是會議名稱的一部分 (如 "2018 25th APSEC")，不該被切除
+                is_part_of_title = False
+                
+                # 檢查 1: 序數詞 (25th, 1st...)
+                if re.match(r'^(?:\d+)?(st|nd|rd|th)\b', potential_rest, re.IGNORECASE):
+                    is_part_of_title = True
+                    
+                # 檢查 2: 會議關鍵字 (Conference, IEEE...)
+                # 有時候年份後面直接接會議名，如 "2018 IEEE International..."
+                if re.match(r'^(IEEE|ACM|International|Conference|Symposium|Workshop)', potential_rest, re.IGNORECASE):
+                    is_part_of_title = True
+
+                # 只有在「不是」會議標題的一部分時，才真正執行切除
+                if not is_part_of_title:
+                    after_title = potential_rest
 
         # === 3. 提取來源資訊 (原始邏輯) ===
         full_search_text = after_title 
         
+        # 1. Page Match
+        pp_match = re.search(r'\b(?:pp?\.?|Pages?|Page\s*No\.?|頁)\s*(\d+(?:\s*(?:[\–\-—]|to)\s*\d+)?)', full_search_text, re.IGNORECASE)
+        
+        if pp_match: 
+            raw_pages = pp_match.group(1)
+            result['pages'] = re.sub(r'\s+', '', raw_pages).replace('to', '-').replace('–', '-').replace('—', '-')
+            
+            # [關鍵修復] 使用位置截斷 (Slicing) 而非 replace
+            # 將抓到的部分直接從字串中挖掉
+            start, end = pp_match.span()
+            full_search_text = full_search_text[:start] + " " + full_search_text[end:]
+            
+        # 2. Volume Match
         vol_match = re.search(r'\b(?:Vol\.?|Volume|卷|第\s*\d+\s*卷)\s*(\d+)', full_search_text, re.IGNORECASE)
         if not vol_match: vol_match = re.search(r'第\s*(\d+)\s*卷', full_search_text)
         if vol_match: result['volume'] = vol_match.group(1)
         
-        no_match = re.search(r'\b(?:no\.?|期|第\s*\d+\s*期)\s*(\d+)', full_search_text, re.IGNORECASE)
+        # 3. Issue Match (加入 Negative Lookbehind 作為雙重保險)
+        no_match = re.search(r'(?<!Page\s)\b(?:no\.?|期|第\s*\d+\s*期)\s*(\d+)', full_search_text, re.IGNORECASE)
         if not no_match: no_match = re.search(r'第\s*(\d+)\s*期', full_search_text)
         if no_match: result['issue'] = no_match.group(1)
         
-        pp_match = re.search(r'\b(?:pp?\.?|Pages?|Page\s*No\.?|頁)\s*(\d+(?:\s*(?:[\–\-—]|to)\s*\d+)?)', full_search_text, re.IGNORECASE)
-        if pp_match: 
-            raw_pages = pp_match.group(1)
-            result['pages'] = re.sub(r'\s+', '', raw_pages).replace('to', '-').replace('–', '-').replace('—', '-')
-
+        
         if not result['year']:
             clean_year_text = re.sub(r'doi:.*', '', full_search_text, flags=re.IGNORECASE)
             clean_year_text = re.sub(r'©\s*\d{4}', '', clean_year_text)
@@ -375,17 +467,18 @@ def extract_ieee_reference_full(ref_text):
         doi_match = re.search(r'(?:doi:|DOI:|https?://doi\.org/)\s*(10\.\d{4,}/[^\s,;\]\)]+)', full_search_text)
         if doi_match: result['doi'] = doi_match.group(1).rstrip('.')
         
-        # URL
-        pdf_url_match = re.search(r'(?:Available:|Retrieved from|URL)\s*(https?://.*?\.pdf)', full_search_text, re.IGNORECASE)
-        if pdf_url_match:
-            result['url'] = pdf_url_match.group(1).replace(' ', '').strip()
-        else:
-            url_match = re.search(r'(?:Available:|Retrieved from|URL)\s*(https?://[^,\n\s\]\)]+)', full_search_text, re.IGNORECASE)
-            if url_match:
-                result['url'] = url_match.group(1).strip()
-            elif not result['url']:
-                gen_url = re.search(r'(https?://[^\s,;]+(?:\.pdf)?)', full_search_text, re.IGNORECASE)
-                if gen_url: result['url'] = gen_url.group(1).strip()
+        # URL (如果之前在前面沒抓到，這裡做最後確認，但不覆蓋已抓到的完整 URL)
+        if not result['url']:
+            pdf_url_match = re.search(r'(?:Available:|Retrieved from|URL)\s*(https?://.*?\.pdf)', full_search_text, re.IGNORECASE)
+            if pdf_url_match:
+                result['url'] = pdf_url_match.group(1).replace(' ', '').strip()
+            else:
+                url_match = re.search(r'(?:Available:|Retrieved from|URL)\s*(https?://[^,\n\s\]\)]+)', full_search_text, re.IGNORECASE)
+                if url_match:
+                    result['url'] = url_match.group(1).strip()
+                elif not result['url']:
+                    gen_url = re.search(r'(https?://[^\s,;]+(?:\.pdf)?)', full_search_text, re.IGNORECASE)
+                    if gen_url: result['url'] = gen_url.group(1).strip()
 
         if result['url'] and 'doi.org' in result['url'] and result['doi']: result['url'] = None
         if result['source'] and re.fullmatch(r'(URL|Available|Online|Retrieved|Website)', result['source'], re.IGNORECASE): result['source'] = None
@@ -393,6 +486,26 @@ def extract_ieee_reference_full(ref_text):
         # Access Date
         acc_match = re.search(r'(?:accessed|retrieved|downloaded)\s+(?:on\s+)?([A-Za-z]+\.?\s+\d{1,2},?\s*\d{4})', full_search_text, re.IGNORECASE)
         if acc_match: result['access_date'] = acc_match.group(1)
+
+        if result.get('source') and result.get('title'):
+        # 移除標點、空白並轉小寫，進行正規化比對
+            t_clean = re.sub(r'[\W_]+', '', result['title'].lower())
+            s_clean = re.sub(r'[\W_]+', '', result['source'].lower())
+        
+        # 1. 完全相同
+            if t_clean == s_clean:
+                result['source'] = None
+                
+            # 2. 包含關係 (來源包含標題，且長度差異極小)
+            elif t_clean in s_clean:
+                diff_len = len(s_clean) - len(t_clean)
+                if diff_len < 15: # 容許一點點差異 (如 "revised edition")
+                    result['source'] = None
+                    
+            # 3. 標題包含來源
+            elif s_clean in t_clean:
+                result['source'] = None
+    # ============================================
 
     return result
 
