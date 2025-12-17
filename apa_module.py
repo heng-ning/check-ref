@@ -327,7 +327,7 @@ def extract_apa_zh_detailed(ref_text):
 
     # 先嘗試提取卷期頁碼，並從 rest 中移除
     meta_match = re.search(
-        r'[,，]\s*(\d+)\s*[卷]?\s*(?:[（(](\d+)[)）期]?)?\s*[,，]\s*(\d+)\s*[–\-~]\s*(\d+)',
+        r'[,，]\s*(\d+)\s*[卷]?\s*(?:[（(]\s*(\d+)\s*[)）期]?)?\s*[,，。]\s*(\d+)\s*[–\-~]\s*(\d+)',
         rest
     )
     if meta_match:
@@ -337,9 +337,9 @@ def extract_apa_zh_detailed(ref_text):
         result['pages'] = f"{meta_match.group(3)}–{meta_match.group(4)}"
         # 移除卷期頁碼部分，並清理結尾的標點
         rest = rest[:meta_match.start()].strip()
-        rest = rest.rstrip(',，。. ')  # 分開處理，確保徹底清理
+        rest = rest.rstrip(',，。. ')
     else:
-        # 只有卷號
+        # 只有卷號（原本的邏輯保持不變）
         vol_match = re.search(r'[,，]\s*(\d+)\s*[卷]', rest)
         if vol_match:
             result['volume'] = vol_match.group(1)
@@ -600,13 +600,16 @@ def merge_references_unified(paragraphs):
             current_stripped = current_ref.rstrip()
             # 檢查是否以 DOI 或 URL 結尾
             ends_with_doi_url = bool(
-                re.search(r'(https?://[^\s]+|doi\.org/[^\s]+|10\.\d{4}/[^\s]+)[.\s]*$', current_stripped)
+                re.search(r'(https?://[^\s]+|doi\.org/[^\s]+|10\.\d{4}/[^\s]+)[.\s]*$', current_stripped) or
+                re.search(r'[。．][）)]?\s*$', current_stripped) or  # 中文句號結尾（可能有括號）
+                re.search(r'[\d]+\s*[–\-—]\s*[\d]+[。．]\s*$', current_stripped)  # 頁碼+句號結尾
             )
             
             # 檢查新段落是否為明確的作者開頭
             clear_author_start = bool(
                 re.match(r'^([A-Z][A-Za-z\-\']+),\s+([A-Z]\.(?:\s*[A-Z]\.)*)', para) and
-                re.search(r'\(\d{4}\)', para)
+                re.search(r'\(\d{4}\)', para) or
+                re.match(r'^[\u4e00-\u9fff]{2,}[、（(]', para)  # 中文作者開頭
             )
             
             # 如果兩個條件都滿足，強制切分
@@ -679,31 +682,75 @@ def convert_en_apa_to_ieee(data):
     return " ".join(parts)
 
 def convert_zh_apa_to_num(data):
+    # 輸出格式：作者，年份，「標題」，《期刊名》，卷期，頁碼。
+
     parts = []
-    # [UPDATED] 修正作者連接符號，list 轉字串
+    # 作者
     if isinstance(data.get('authors'), list):
         auth = "、".join(data.get('authors'))
     else:
         auth = data.get('authors', '')
-        
+    
     if auth: parts.append(auth)
-    if data.get('title'): parts.append(f"「{data['title']}」")
-    # [UPDATED] 確保出處有被抓到才顯示
-    if data.get('source'): parts.append(f"《{data['source']}》")
+    
+    # 年份
     if data.get('year'): parts.append(data['year'])
+    
+    # 標題
+    if data.get('title'): parts.append(f"「{data['title']}」")
+    
+    # 來源（期刊或書名）
+    if data.get('source'): parts.append(f"《{data['source']}》")
+    
+    # 卷期
+    vol_issue = []
+    if data.get('volume'): vol_issue.append(f"{data['volume']}卷")
+    if data.get('issue'): vol_issue.append(f"{data['issue']}期")
+    if vol_issue: parts.append("".join(vol_issue))
+    
+    # 頁碼
+    if data.get('pages'): parts.append(data['pages'])
+    
+    # URL
+    if data.get('url'): parts.append(data['url'])
+    
     return "，".join(parts) + "。"
 
 def convert_zh_num_to_apa(data):
-    # [UPDATED] 修正作者連接符號
+    # 輸出格式：作者（年份）。標題。《期刊名》，卷(期)，頁碼。
+
+    parts = []
+    
+    # 作者（年份）
     if isinstance(data.get('authors'), list):
         auth = "、".join(data.get('authors'))
     else:
         auth = data.get('authors', '')
-        
-    parts = []
+    
     parts.append(f"{auth}（{data.get('year', '無年份')}）")
+    
+    # 標題
     if data.get('title'): parts.append(data['title'])
-    if data.get('source'): parts.append(f"《{data['source']}》")
+    
+    # 來源（期刊或書名）
+    if data.get('source'):
+        source_part = f"《{data['source']}》"
+        
+        # 卷期
+        if data.get('volume'):
+            source_part += f"，{data['volume']}"
+            if data.get('issue'):
+                source_part += f"({data['issue']})"
+        
+        # 頁碼
+        if data.get('pages'):
+            source_part += f"，{data['pages']}"
+        
+        parts.append(source_part)
+    
+    # URL
+    if data.get('url'): parts.append(data['url'])
+    
     return "。".join(parts) + "。"
 
 # ===== 核心整合 =====
