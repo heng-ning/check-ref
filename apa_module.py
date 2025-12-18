@@ -52,6 +52,7 @@ def extract_apa_en_detailed(ref_text):
         'publisher': None,
         'editors': None,
         'book_title': None,
+        'edition': None,
         'source_type': None,
         'document_type': None,
         'url': None,
@@ -141,18 +142,47 @@ def extract_apa_en_detailed(ref_text):
     # 判斷是否為書籍章節或一般書籍
     # 優先檢查是否為書籍章節格式（In ... (Eds.)）
     is_book_chapter = bool(re.search(r'\bIn\s+.+?\s*\(Eds?\.\)', content_part, re.IGNORECASE))
-    # 或是作者為編者，或標題包含書籍關鍵字
+
+    # 判斷是否為書籍
     is_book = is_book_chapter or bool(
         re.search(r'\(eds?\.\)', author_part, re.IGNORECASE) or 
         re.search(r'\b(manual|handbook|guide|textbook|encyclopedia|dictionary)\b', content_part, re.IGNORECASE)
     )
+
+    if not is_book:
+        # 檢查是否有卷期頁碼（強烈暗示期刊）
+        has_volume_issue = bool(re.search(r',\s*\d+\s*[\(（]', content_part))
+        has_volume_pages = bool(re.search(r',\s*\d+\s*,\s*[A-Z]?\d+', content_part))
+        
+        if not (has_volume_issue or has_volume_pages):
+            # 沒有卷期頁碼，檢查出版社特徵
+            
+            # 1. 知名出版社名稱
+            well_known_publishers = r'\b(Wiley|Springer|Elsevier|Sage|Routledge|Pearson|McGraw|Oxford|Cambridge|Freeman|Jossey|Bass|Guilford|Palgrave|Macmillan|Penguin|Random|Simon|Schuster|HarperCollins|Norton|Houghton|Mifflin|Addison|Wesley)\b'
+            if re.search(well_known_publishers, content_part, re.IGNORECASE):
+                is_book = True
+            
+            # 2. 出版社關鍵字
+            elif re.search(r'\b(Press|Publisher|Publishing|Books|University|College|Institute|Foundation|Association|Inc\.|Ltd\.|LLC|Co\.|Group)\b', content_part, re.IGNORECASE):
+                is_book = True
+            
+            # 3. 結構模式：標題. 出版社. （且不含期刊關鍵字）
+            else:
+                sentence_splits = list(re.finditer(r'\.\s+[A-Z]', content_part))
+                has_comma_with_numbers = bool(re.search(r',\s*\d+', content_part))
+                
+                if len(sentence_splits) == 1 and not has_comma_with_numbers:
+                    last_part = content_part[sentence_splits[0].end()-1:].strip()
+                    if not re.search(r'\b(Journal|Review|Magazine|Quarterly|Bulletin|Proceedings|Transactions|Annals)\b', last_part, re.IGNORECASE):
+                        if re.match(r'^(?:[A-Z]\.\s+)*[A-Z][A-Za-z\-&]+(?:\s+[A-Z][A-Za-z\-&]+)*\.?\s*$', last_part):
+                            is_book = True
 
     # 提取後設資料 (卷期頁碼/文章編號)
     # 格式 1: Journal, Vol(Issue), pages. 例如：Journal, 14(2), 123-456.
     # 格式 2: Journal, Vol(Issue), article_number. 例如：Journal, 13(11), 6474.
     # 格式 3: Journal, Vol. 例如：Journal, 160.
     meta_match = re.search(
-        r',\s*(\d+)(?:\s*\((\d+)\))?(?:,\s*([A-Za-z]?\d+(?:[\–\-][A-Za-z]?\d+)?))?(?:\.|\s|$)', 
+        r',\s*(\d+)(?:\s*\(([^)]+)\))?(?:,\s*([A-Za-z]?\d+(?:[\–\-][A-Za-z]?\d+)?))?(?:\.|\s|$)', 
         content_part
     )
 
@@ -196,21 +226,23 @@ def extract_apa_en_detailed(ref_text):
     if is_book:
         # === 先檢查是否為書籍章節格式 ===
         # 格式：章節標題. In 編者 (Eds.), 書名 (pp. xxx). 出版社.
-        # 改進正則表達式，更精確匹配
         chapter_match = re.search(
-            r'^(.+?)\.\s+In\s+(.+?)\s*\(Eds?\.\),\s*(.+?)\s*\(pp\.\s*([\d\s\–\-—]+)\)', 
+            r'^(.+?)\.\s+In\s+(.+?)\s*\(Eds?\.\),\s*(.+?)\s*\((?:(\d+(?:st|nd|rd|th)\s+ed\.),?\s*)?pp\.\s*([\d\s\–\-—]+)\)', 
             title_source_part, 
             re.IGNORECASE
         )
-
         if chapter_match:
             # 這是書籍章節
             result['title'] = chapter_match.group(1).strip()  # 章節標題
             result['editors'] = "In " + chapter_match.group(2).strip() + " (Eds.)"  # 編者
             result['book_title'] = chapter_match.group(3).strip()  # 書名
             
+            # 版次（可能為 None）
+            if chapter_match.group(4):
+                result['edition'] = chapter_match.group(4).strip()
+            
             # 清理頁碼中的多餘空格
-            raw_pages = chapter_match.group(4).strip()
+            raw_pages = chapter_match.group(5).strip()
             clean_pages = re.sub(r'\s+', '', raw_pages)  # 移除所有空格
             result['pages'] = clean_pages  # 例如 "254–257"
             
@@ -226,20 +258,29 @@ def extract_apa_en_detailed(ref_text):
         else:
             # 一般書籍格式：標題. 出版社.
             split_match = re.search(r'\.\s+([A-Z])', title_source_part)
-            
+
             if split_match:
                 split_pos = split_match.start()
                 result['title'] = title_source_part[:split_pos].strip()
                 
-                # 出版社部分
-                publisher_part = title_source_part[split_pos + 1:].strip()
-                next_dot = publisher_part.find('.')
-                if next_dot != -1:
-                    result['publisher'] = publisher_part[:next_dot].strip()
-                else:
-                    result['publisher'] = publisher_part.rstrip('.')
+                # 出版社部分：從匹配的大寫字母開始到結尾
+                publisher_part = title_source_part[split_match.end() - 1:].strip()
+                result['publisher'] = publisher_part.rstrip('.')
+                
+                # 檢查標題中是否包含版次資訊
+                edition_in_title = re.search(r'\((\d+(?:st|nd|rd|th)\s+ed\.)\)\s*$', result['title'])
+                if edition_in_title:
+                    result['edition'] = edition_in_title.group(1)
+                    # 從標題中移除版次部分
+                    result['title'] = result['title'][:edition_in_title.start()].strip()
             else:
                 result['title'] = title_source_part.rstrip('.')
+                
+                # 檢查標題中是否包含版次資訊（無出版社的情況）
+                edition_in_title = re.search(r'\((\d+(?:st|nd|rd|th)\s+ed\.)\)\s*$', result['title'])
+                if edition_in_title:
+                    result['edition'] = edition_in_title.group(1)
+                    result['title'] = result['title'][:edition_in_title.start()].strip()
     else:
         # 期刊格式：標題. 期刊名
         # 先識別並移除文獻類型標註 (如 [Project Report], Technical Report 等)
@@ -661,23 +702,65 @@ def convert_en_apa_to_ieee(data):
     if auth_str: parts.append(auth_str + ",")
     if data.get('title'): parts.append(f'"{data["title"]},"')
     
-    # 分別處理期刊和書籍
-    if data.get('source'):  # 期刊
-        parts.append(f"{data['source']},")
-    elif data.get('publisher'):  # 書籍
-        parts.append(f"{data['publisher']},")
-    
-    if data.get('volume'): parts.append(f"vol. {data['volume']},")
-    if data.get('issue'): parts.append(f"no. {data['issue']},")
-    if data.get('pages'): parts.append(f"pp. {data['pages']},")
-    
-    # 加入月份
-    if data.get('month'): parts.append(f"{data['month']}")
-    if data.get('year'): parts.append(f"{data['year']}.")
+    # 處理書籍章節
+    if data.get('source_type') == 'Book Chapter':
+        # 格式：作者, "章節標題," 編者, 書名, 版次, 出版社, 年份, pp. 頁碼.
+        if data.get('editors'):
+            parts.append(f"{data['editors']},")
+        if data.get('book_title'):
+            parts.append(f"{data['book_title']},")
+        if data.get('edition'):
+            parts.append(f"{data['edition']},")
+        if data.get('publisher'):
+            parts.append(f"{data['publisher']},")
+        if data.get('year'):
+            parts.append(f"{data['year']},")
+        if data.get('pages'):
+            parts.append(f"pp. {data['pages']}.")
+    else:
+        # 分別處理期刊和書籍
+        if data.get('source'):  # 期刊
+            parts.append(f"{data['source']},")
+            
+            # 卷期處理
+            if data.get('volume'):
+                volume_str = f"vol. {data['volume']}"
+                
+                if data.get('issue'):
+                    issue_val = str(data['issue'])
+                    # 判斷期號是純數字還是文字
+                    if issue_val.isdigit() or re.match(r'^\d+[\-–—]\d+$', issue_val):
+                        # 純數字或數字範圍：使用 vol. X, no. Y 格式
+                        volume_str += f", no. {issue_val}"
+                    else:
+                        # 包含文字（如 Supplement）：使用 vol. X(Y) 格式
+                        volume_str = f"vol. {data['volume']}({issue_val})"
+                
+                parts.append(volume_str + ",")
+            
+            # 頁碼處理
+            if data.get('pages'):
+                pages_val = data['pages']
+                # 如果頁碼包含字母，不加 pp.
+                if re.search(r'[A-Za-z]', pages_val):
+                    parts.append(f"{pages_val},")
+                else:
+                    parts.append(f"pp. {pages_val},")
+                    
+        elif data.get('publisher'):  # 一般書籍
+            if data.get('edition'):
+                parts.append(f"{data['edition']},")
+            parts.append(f"{data['publisher']},")
+        
+        # 加入月份
+        if data.get('month'): parts.append(f"{data['month']}")
+        if data.get('year'): parts.append(f"{data['year']}.")
     
     # 加入 DOI 或 URL
-    if data.get('doi'): parts.append(f"doi: {data['doi']}.")
-    elif data.get('url'): parts.append(f"[Online]. Available: {data['url']}")
+    if data.get('doi'): 
+        parts.append(f"doi: {data['doi']}.")
+    elif data.get('url'): 
+        parts.append(f"[Online]. Available: {data['url']}")
     
     return " ".join(parts)
 

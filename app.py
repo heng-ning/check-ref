@@ -188,12 +188,43 @@ def display_reference_with_details(ref, index, format_type='IEEE'):
             
             # 卷期
             if ref.get('volume') or ref.get('issue'):
-                vol_str = f"Vol. {ref['volume']}" if ref.get('volume') else ""
-                issue_str = f"No. {ref['issue']}" if ref.get('issue') else ""
-                vi_display = ", ".join(filter(None, [vol_str, issue_str]))
-                st.markdown(f"**📊 卷期**")
-                st.markdown(f"　└─ {vi_display}")
+                volume_val = ref.get('volume')
+                issue_val = ref.get('issue')
+                
+                # 只有當值不是 None 時才處理
+                if volume_val and issue_val:
+                    # 判斷期號格式
+                    issue_str = str(issue_val)
+                    
+                    # 檢查是否為純數字、數字範圍（1-2、3–4）、或 "1, 2" 格式
+                    is_numeric_issue = bool(
+                        issue_str.isdigit() or 
+                        re.match(r'^\d+[\-–—]\d+$', issue_str) or  # 數字範圍
+                        re.match(r'^\d+,\s*\d+$', issue_str)       # 逗號分隔的數字
+                    )
+                    
+                    if is_numeric_issue:
+                        # 純數字或數字範圍：使用 Vol. X, No. Y 格式
+                        vi_display = f"Vol. {volume_val}, No. {issue_str}"
+                    else:
+                        # 包含文字（如 Supplement）：使用 Vol. X(Y) 格式
+                        vi_display = f"Vol. {volume_val}({issue_str})"
+                elif volume_val:
+                    vi_display = f"Vol. {volume_val}"
+                elif issue_val:
+                    vi_display = f"No. {issue_val}"
+                else:
+                    vi_display = None
+                
+                if vi_display:
+                    st.markdown(f"**📊 卷期**")
+                    st.markdown(f"　└─ {vi_display}")
             
+            # 版次
+            if ref.get('edition'):
+                st.markdown(f"**📖 版次**")
+                st.markdown(f"　└─ {ref['edition']}")
+
             # 頁碼/文章編號
             if ref.get('article_number'):
                 st.markdown(f"**📄 文章編號**")
