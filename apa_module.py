@@ -335,6 +335,9 @@ def extract_apa_zh_detailed(ref_text):
     }
     result['doi'] = extract_doi(ref_text)
 
+    # 先移除行首的數字編號，如 "5. " 或 "12. "
+    ref_text = re.sub(r'^\s*\d+\.\s*', '', ref_text)
+
     # 提取 URL
     url_match = re.search(r'https?://[^\s。]+', ref_text)
     if url_match:
@@ -362,6 +365,10 @@ def extract_apa_zh_detailed(ref_text):
     
     result['year'] = year_match.group(1)
     author_part = ref_text[:year_match.start()].strip()
+
+    # 移除作者名稱中間的中文空白，例如「教育部 體育署」→「教育部體育署」
+    author_part = re.sub(r'(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])', '', author_part)
+
     result['authors'] = parse_chinese_authors(author_part)
     
     rest = ref_text[year_match.end():].strip().lstrip('.。 ')
@@ -418,6 +425,7 @@ def extract_apa_zh_detailed(ref_text):
                 result['title'] = rest.strip()
 
     return result
+
 
 def extract_numbered_zh_detailed(ref_text):
     result = {

@@ -17,11 +17,15 @@ def check_references(in_text_citations, reference_list):
         for junk in ['et al.', 'et al', 'and', '&', ',','與', '和', '及']:
             name = name.replace(junk, ' ')
         # 3. 只取第一個單字 (通常就是姓氏)
-        parts = name.split()
-        if parts:
-            # 只保留英數字，移除點號等
-            return "".join(filter(str.isalnum, parts[0]))
-        return ""
+        if any('\u4e00' <= char <= '\u9fff' for char in name):
+            # 如果是中文，直接移除所有空白，回傳全名（例如 "張三"）
+            return "".join(filter(str.isalnum, name))
+        else:
+            parts = name.split()
+            if parts:
+                # 只保留英數字，移除點號等
+                return "".join(filter(str.isalnum, parts[0]))
+            return ""
 
     # --- 輔助函式：清理參考文獻文字 ---
     def clean_ref_text(text):
@@ -58,6 +62,8 @@ def check_references(in_text_citations, reference_list):
             
             # 只有當提取出有效的作者和年份時才進行比對
             if cit_year and cit_auth_core:
+                found_for_this_citation = False  # 用來標記這筆引用是否至少找到一個對象
+                
                 for i, ref in enumerate(reference_list):
                     # 獲取參考文獻的原始文字 (包含所有資訊)
                     ref_original = str(ref.get('original', '')).lower()
@@ -68,16 +74,18 @@ def check_references(in_text_citations, reference_list):
                         # 步驟 2: 如果作者對了，再檢查「年份」是否也存在
                         if cit_year in ref_original:
                             is_found = True
+                            found_for_this_citation = True
                             matched_indices.add(i)
-                            break # 完美匹配，跳出迴圈
+                            # [修正] 移除 break！
+                            # 讓它繼續往下找，因為可能有第二篇同作者同年份的文章
+                            # break 
                         else:
-                            # 作者對了但年份不對 -> 可能是年份引用錯誤
-                            # 嘗試從該條參考文獻中抓一個 4 碼年份作為提示
-                            # 這裡簡單抓取 19xx 或 20xx 的數字
-                            years_in_ref = re.findall(r'(19\d{2}|20\d{2})', ref_original)
-                            # 如果有抓到年份，且還沒記錄過提示，就記錄下來
-                            if years_in_ref and not potential_year_error_hint:
-                                potential_year_error_hint = years_in_ref[0]
+                            # (原本的年份提示邏輯保持不變)
+                            # 但要注意，如果已經 found_for_this_citation = True，這個提示就不重要了
+                            if not found_for_this_citation:
+                                years_in_ref = re.findall(r'(19\d{2}|20\d{2})', ref_original)
+                                if years_in_ref and not potential_year_error_hint:
+                                    potential_year_error_hint = years_in_ref[0]
         
         if not is_found:
             # 標記錯誤類型，方便前端 UI 顯示不同提示

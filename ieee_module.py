@@ -188,35 +188,95 @@ def extract_ieee_reference_full(ref_text):
             if "大學" in result['source']: result['publisher'] = result['source']
 
     else:
-        #  英文解析邏輯
+        # ==========================================
+        #       英文解析邏輯
+        # ==========================================
 
-        quote_patterns = [
-            (r'"', r'"'), (r'“', r'”'), (r'“', r'“'),  (r'”', r'”'),(r'\'', r'\'')
-        ]
+        # === [NEW] 標準 (Standard) 文獻專用解析 ===
+        # 格式範例：[2] IEEE Transformer Committee, ANSI standard C57.13-1993, March 1994, IEEE Standard Requirements...
+        std_match = re.search(r'\b(IEEE|ANSI|ISO|IEC)\s+(?:Std|Standard)\.?\s+([\w\d\.\-]+)', rest_text, re.IGNORECASE)
         
+        is_standard_ref = False
+        if std_match:
+            # 如果沒有引號包住標題，且有逗號分隔，判定為標準格式
+            if not re.search(r'["“].+["”]', rest_text) and ',' in rest_text:
+                is_standard_ref = True
+
         title_found = False
         after_title = rest_text 
-        
-        for open_q, close_q in quote_patterns:
-            pattern = re.escape(open_q) + r'(.+?)' + re.escape(close_q)
-            match = re.search(pattern, rest_text)
-            if match:
-                # 抓到標題
-                title = match.group(1).strip().rstrip(',.。;；:：')
-                result['title'] = title
-                # 抓到作者
-                before_title = rest_text[:match.start()].strip().rstrip(',. ')
-                before_title = re.sub(r'\s+and\s*$', '', before_title, flags=re.IGNORECASE)
-                before_title = re.sub(r',?\s*(?:et\s+al\.?|等)\s*$', '', before_title, flags=re.IGNORECASE)
+
+        if is_standard_ref:
+            result['source_type'] = 'Standard'
+            parts = [p.strip() for p in rest_text.split(',') if p.strip()]
+            
+            if len(parts) > 0:
+                result['authors'] = parts[0] # 第一段：IEEE Transformer Committee
+            
+            # 尋找年份與標題切分點
+            year_index = -1
+            for i, part in enumerate(parts):
+                # 排除第一段 (作者)
+                if i == 0: continue
                 
-                if before_title:
-                    result['authors'] = before_title
-                    if 'parse_ieee_authors' in globals():
-                        result['parsed_authors'] = parse_ieee_authors(before_title)
+                # 找獨立年份 (1994) 或 月份+年份 (March 1994)
+                # 注意排除標準編號中的年份 (C57.13-1993)
+                y_match = re.search(r'\b(19\d{2}|20\d{2})\b', part)
+                if y_match:
+                    # 檢查是否緊跟在連字號後 (編號特徵)
+                    if re.search(r'-\d{4}', part):
+                        continue 
+                    
+                    result['year'] = y_match.group(1)
+                    year_index = i
+                    
+                    # 提取月份
+                    if re.search(r'[a-zA-Z]', part): # 如果包含字母，可能是 "March 1994"
+                        result['month'] = part.replace(result['year'], '').strip()
+                    break
+            
+            # 分配 Source (標準編號) 和 Title
+            if year_index != -1:
+                # 年份中間：作者 , [Source] , [Year] , [Title]
+                # 來源 = 作者與年份中間的部分
+                if year_index > 1:
+                    result['source'] = ", ".join(parts[1:year_index])
                 
-                after_title = rest_text[match.end():].strip()
-                title_found = True
-                break
+                # 標題 = 年份之後的部分
+                if year_index < len(parts) - 1:
+                    result['title'] = ", ".join(parts[year_index+1:])
+            else:
+                # 沒找到年份：假設最後一段是標題，中間是來源
+                if len(parts) >= 2:
+                    result['title'] = parts[-1]
+                    result['source'] = ", ".join(parts[1:-1])
+
+            title_found = True
+            after_title = "" # 處理完畢
+
+        else:
+            # === 原有的 Quote Pattern 邏輯 ===
+            quote_patterns = [
+                (r'"', r'"'), (r'“', r'”'), (r'“', r'“'),  (r'”', r'”'),(r'\'', r'\'')
+            ]
+            
+            for open_q, close_q in quote_patterns:
+                pattern = re.escape(open_q) + r'(.+?)' + re.escape(close_q)
+                match = re.search(pattern, rest_text)
+                if match:
+                    title = match.group(1).strip().rstrip(',.。;；:：')
+                    result['title'] = title
+                    before_title = rest_text[:match.start()].strip().rstrip(',. ')
+                    before_title = re.sub(r'\s+and\s*$', '', before_title, flags=re.IGNORECASE)
+                    before_title = re.sub(r',?\s*(?:et\s+al\.?|等)\s*$', '', before_title, flags=re.IGNORECASE)
+                    
+                    if before_title:
+                        result['authors'] = before_title
+                        if 'parse_ieee_authors' in globals():
+                            result['parsed_authors'] = parse_ieee_authors(before_title)
+                    
+                    after_title = rest_text[match.end():].strip()
+                    title_found = True
+                    break
                 
         # Fallback: 沒引號
         if not title_found:
@@ -310,15 +370,15 @@ def extract_ieee_reference_full(ref_text):
 
         # 2. 如果沒有 Markdown，嘗試直接抓取 .pdf 結尾的 URL (Backup Strategy)
         elif re.search(r'\.pdf', after_title, re.IGNORECASE):
-             pdf_wide_match = re.search(r'(https?://[\s\S]*?\.pdf)', after_title, re.IGNORECASE)
-             if pdf_wide_match:
-                 raw_url = pdf_wide_match.group(1)
-                 result['url'] = raw_url.replace(' ', '').replace('\n', '')
-                 
-                 # 同樣使用位置截斷
-                 start, end = pdf_wide_match.span()
-                 after_title = after_title[:start] + " " + after_title[end:]
-                 after_title = after_title.strip()
+            pdf_wide_match = re.search(r'(https?://[\s\S]*?\.pdf)', after_title, re.IGNORECASE)
+            if pdf_wide_match:
+                raw_url = pdf_wide_match.group(1)
+                result['url'] = raw_url.replace(' ', '').replace('\n', '')
+            
+                # 同樣使用位置截斷
+                start, end = pdf_wide_match.span()
+                after_title = after_title[:start] + " " + after_title[end:]
+                after_title = after_title.strip()
 
         non_journal_keywords = [
         "Online document", "Online", "Available", "Retrieved from", 
@@ -455,13 +515,45 @@ def extract_ieee_reference_full(ref_text):
 
         # Month
         months_list = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Sept", "Oct", "Nov", "Dec", "January", "February", "March", "April", "June", "July", "August", "September", "October", "November", "December"]
-        month_part = r'(?:' + '|'.join(months_list) + r')\.?'
-        comp_month_match = re.search(r'\b' + month_part + r'\s*[-/–]\s*' + month_part + r'\b', full_search_text, re.IGNORECASE)
-        if comp_month_match:
-            result['month'] = comp_month_match.group(0)
-        else:
-            month_match = re.search(months_regex, full_search_text, re.IGNORECASE)
-            if month_match: result['month'] = month_match.group(0)
+
+        months_pattern = r'(?:' + '|'.join(months_list) + r')\.?'
+        # 模式 1: 日-日 月, 年 (19-20 Nov., 2004)
+        date_pattern1 = re.compile(r'\b(\d{1,2}(?:[-–]\d{1,2})?)\s+(' + months_pattern + r'),?\s*' + str(result['year']), re.IGNORECASE)
+        
+        # 模式 2: 月 日-日, 年 (March 16-18, 2004)
+        date_pattern2 = re.compile(r'\b(' + months_pattern + r')\s+(\d{1,2}(?:[-–]\d{1,2})?),?\s*' + str(result['year']), re.IGNORECASE)
+
+        full_search_text = after_title
+        
+        # 嘗試匹配完整日期
+        date_match = None
+        if result['year']:
+            date_match = date_pattern1.search(full_search_text)
+            if not date_match:
+                date_match = date_pattern2.search(full_search_text)
+        
+        if date_match:
+            # 抓到了完整日期！
+            raw_date = date_match.group(0)
+            # 儲存到 month 欄位 (或其他您想存的地方，如 access_date 或新建 date 欄位)
+            # 這裡我們先存到 month，因為通常 IEEE 會把月份和年份分開
+            # 但為了資訊完整，我們可以把整串日期資訊存入 month (除了年份)
+            date_info = raw_date.replace(str(result['year']), '').strip(',. ')
+            result['month'] = date_info
+            
+            # [關鍵] 從字串中切除這個日期，避免它被當作機構名稱或地點
+            start, end = date_match.span()
+            # 為了安全，我們只切除日期部分，年份保留給後續邏輯確認(或也切除)
+            # 這裡選擇切除整串 (因為年份已經在 result['year'] 了)
+            full_search_text = full_search_text[:start] + " " + full_search_text[end:]
+
+        # month_part = r'(?:' + '|'.join(months_list) + r')\.?'
+        # comp_month_match = re.search(r'\b' + month_part + r'\s*[-/–]\s*' + month_part + r'\b', full_search_text, re.IGNORECASE)
+        # if comp_month_match:
+        #     result['month'] = comp_month_match.group(0)
+        # else:
+        #     month_match = re.search(months_regex, full_search_text, re.IGNORECASE)
+        #     if month_match: result['month'] = month_match.group(0)
         
         # DOI
         doi_match = re.search(r'(?:doi:|DOI:|https?://doi\.org/)\s*(10\.\d{4,}/[^\s,;\]\)]+)', full_search_text)
