@@ -259,7 +259,23 @@ def display_reference_with_details(ref, index, format_type='IEEE'):
             # 原文
             st.divider()
             st.caption("📍 原始參考文獻文字")
-            st.code(ref['original'], language=None)
+            st.markdown(f"""
+                <div style="
+                    background-color: #f0f2f6;
+                    border-left: 3px solid #1f77b4;
+                    padding: 12px 12px 24px 12px;
+                    border-radius: 4px;
+                    font-family: monospace;
+                    font-size: 14px;
+                    line-height: 1.6;
+                    white-space: pre-wrap;
+                    word-wrap: break-word;
+                    overflow-wrap: break-word;
+                    margin-bottom: 25px;
+                ">
+                {ref['original']}
+                </div>
+                """, unsafe_allow_html=True)
         
         with c_action:
             st.markdown("**🛠️ 操作**")
@@ -267,20 +283,88 @@ def display_reference_with_details(ref, index, format_type='IEEE'):
             # 根據格式顯示不同的轉換按鈕
             if format_type == 'IEEE':
                 if st.button("轉 APA", key=f"ref_to_apa_{index}"):
-                    st.code(convert_en_ieee_to_apa(ref), language='text')
+                    converted_text = convert_en_ieee_to_apa(ref)
+                    st.markdown(f"""
+                    <div style="
+                        background-color: #f0f2f6;
+                        border-left: 3px solid #28a745;
+                        padding: 12px 12px 24px 12px;
+                        border-radius: 4px;
+                        font-family: monospace;
+                        font-size: 14px;
+                        line-height: 1.6;
+                        white-space: pre-wrap;
+                        word-wrap: break-word;
+                        overflow-wrap: break-word;
+                        margin-bottom: 25px;
+                    ">
+                    {converted_text}
+                    </div>
+                    """, unsafe_allow_html=True)
             
             elif format_type == 'APA':
                 if lang == 'EN':
                     if st.button("轉 IEEE", key=f"ref_to_ieee_{index}"):
-                        st.code(convert_en_apa_to_ieee(ref), language='text')
+                        converted_text = convert_en_apa_to_ieee(ref)
+                        st.markdown(f"""
+                        <div style="
+                            background-color: #f0f2f6;
+                            border-left: 3px solid #0066cc;
+                            padding: 12px 12px 24px 12px;
+                            border-radius: 4px;
+                            font-family: monospace;
+                            font-size: 14px;
+                            line-height: 1.6;
+                            white-space: pre-wrap;
+                            word-wrap: break-word;
+                            overflow-wrap: break-word;
+                            margin-bottom: 25px;
+                        ">
+                        {converted_text}
+                        </div>
+                        """, unsafe_allow_html=True)
                 elif lang == 'ZH':
                     fmt = ref.get('format', '')
                     if 'APA' in fmt:
-                        if st.button("轉 IEEE", key=f"ref_to_num_{index}"):
-                            st.code(convert_zh_apa_to_num(ref), language='text')
+                        if st.button("轉編號", key=f"ref_to_num_{index}"):
+                            converted_text = convert_zh_apa_to_num(ref)
+                            st.markdown(f"""
+                            <div style="
+                                background-color: #f0f2f6;
+                                border-left: 3px solid #0066cc;
+                                padding: 12px 12px 24px 12px;
+                                border-radius: 4px;
+                                font-family: monospace;
+                                font-size: 14px;
+                                line-height: 1.6;
+                                white-space: pre-wrap;
+                                word-wrap: break-word;
+                                overflow-wrap: break-word;
+                                margin-bottom: 25px;
+                            ">
+                            {converted_text}
+                            </div>
+                            """, unsafe_allow_html=True)
                     elif 'Numbered' in fmt:
                         if st.button("轉 APA", key=f"ref_to_apa_{index}"):
-                            st.code(convert_zh_num_to_apa(ref), language='text')
+                            converted_text = convert_zh_num_to_apa(ref)
+                            st.markdown(f"""
+                            <div style="
+                                background-color: #f0f2f6;
+                                border-left: 3px solid #28a745;
+                                padding: 12px 12px 24px 12px;
+                                border-radius: 4px;
+                                font-family: monospace;
+                                font-size: 14px;
+                                line-height: 1.6;
+                                white-space: pre-wrap;
+                                word-wrap: break-word;
+                                overflow-wrap: break-word;
+                                margin-bottom: 25px;
+                            ">
+                            {converted_text}
+                            </div>
+                            """, unsafe_allow_html=True)
 
 # ==================== 主區域：檔案上傳 ====================
 
