@@ -120,251 +120,197 @@ def display_reference_with_details(ref, index, format_type='IEEE'):
     ref_num = ref.get('ref_number', str(index))
     
     # 根據來源類型決定圖示
-    stype = ref.get('source_type') or ''
-    doc_type = ref.get('document_type') or ''
     lang = ref.get('lang', 'EN')
     
     with st.expander(f"[{ref_num}] {title_text}", expanded=False):
-        c_info, c_action = st.columns([3, 1])
+        # 作者
+        authors_data = ref.get('authors')
+        if authors_data:
+            st.markdown(f"**👥 作者**")
+            # IEEE 格式才使用 parsed_authors（名 姓）
+            if format_type == 'IEEE' and ref.get('parsed_authors'):
+                auth_list = [f"{a.get('first', '')} {a.get('last', '')}".strip() for a in ref['parsed_authors']]
+                st.markdown(f"　└─ {', '.join(auth_list)}")
+            elif isinstance(authors_data, list):
+                # APA 格式的作者列表
+                if lang == 'ZH':
+                    author_display = "、".join(authors_data)
+                else:
+                    author_display = ", ".join(authors_data)
+                st.markdown(f"　└─ {author_display}")
+            else:
+                # 字串格式作者
+                st.markdown(f"　└─ {authors_data}")
         
-        with c_info:
-            # 作者
-            authors_data = ref.get('authors')
-            if authors_data:
-                st.markdown(f"**👥 作者**")
-                # IEEE 格式才使用 parsed_authors（名 姓）
-                if format_type == 'IEEE' and ref.get('parsed_authors'):
-                    auth_list = [f"{a.get('first', '')} {a.get('last', '')}".strip() for a in ref['parsed_authors']]
-                    st.markdown(f"　└─ {', '.join(auth_list)}")
-                elif isinstance(authors_data, list):
-                    # APA 格式的作者列表
-                    if lang == 'ZH':
-                        author_display = "、".join(authors_data)
-                    else:
-                        author_display = ", ".join(authors_data)
-                    st.markdown(f"　└─ {author_display}")
-                else:
-                    # 字串格式作者
-                    st.markdown(f"　└─ {authors_data}")
-            
-            # 標題
-            if ref.get('title'):
-                st.markdown(f"**📝 標題**")
-                st.markdown(f"　└─ {ref['title']}")
-            
-            # 書名（若為書籍章節）
-            if ref.get('book_title'):
-                st.markdown(f"**📚 書名**")
-                st.markdown(f"　└─ {ref['book_title']}")
-            
-            # 編輯
-            if ref.get('editors'):
-                st.markdown(f"**✍️ 編輯**")
-                st.markdown(f"　└─ {ref['editors']}")
-            
-            # 來源（會議、期刊、出版社）
-            # 根據格式顯示不同欄位，但保持相同順序
-            if format_type == 'IEEE':
-                source_show = (ref.get('conference_name') or 
-                            ref.get('journal_name') or 
-                            ref.get('source'))
-            else:  # APA
-                source_show = (ref.get('source') or 
-                            ref.get('publisher'))
-
-            if source_show:
-                if ref.get('conference_name'):
-                    label = "會議名稱"
-                elif ref.get('journal_name'):
-                    label = "期刊名稱"
-                elif ref.get('source'):
-                    label = "期刊名稱" if format_type == 'IEEE' else "期刊名稱"
-                elif ref.get('publisher'):
-                    label = "出版社"
-                else:
-                    label = "來源出處"
-                st.markdown(f"**📖 {label}**")
-                st.markdown(f"　└─ {source_show}")
-            
-            # 卷期
-            if ref.get('volume') or ref.get('issue'):
-                volume_val = ref.get('volume')
-                issue_val = ref.get('issue')
-                
-                # 只有當值不是 None 時才處理
-                if volume_val and issue_val:
-                    # 判斷期號格式
-                    issue_str = str(issue_val)
-                    
-                    # 檢查是否為純數字、數字範圍（1-2、3–4）、或 "1, 2" 格式
-                    is_numeric_issue = bool(
-                        issue_str.isdigit() or 
-                        re.match(r'^\d+[\-–—]\d+$', issue_str) or  # 數字範圍
-                        re.match(r'^\d+,\s*\d+$', issue_str)       # 逗號分隔的數字
-                    )
-                    
-                    if is_numeric_issue:
-                        # 純數字或數字範圍：使用 Vol. X, No. Y 格式
-                        vi_display = f"Vol. {volume_val}, No. {issue_str}"
-                    else:
-                        # 包含文字（如 Supplement）：使用 Vol. X(Y) 格式
-                        vi_display = f"Vol. {volume_val}({issue_str})"
-                elif volume_val:
-                    vi_display = f"Vol. {volume_val}"
-                elif issue_val:
-                    vi_display = f"No. {issue_val}"
-                else:
-                    vi_display = None
-                
-                if vi_display:
-                    st.markdown(f"**📊 卷期**")
-                    st.markdown(f"　└─ {vi_display}")
-            
-            # 版次
-            if ref.get('edition'):
-                st.markdown(f"**📖 版次**")
-                st.markdown(f"　└─ {ref['edition']}")
-
-            # 頁碼/文章編號
-            if ref.get('article_number'):
-                st.markdown(f"**📄 文章編號**")
-                st.markdown(f"　└─ {ref['article_number']}")
-            elif ref.get('pages'):
-                formatted_pages = format_pages_display(ref['pages'])
-                st.markdown(f"**📄 頁碼**")
-                st.markdown(f"　└─ {formatted_pages}")
-            
-            # 年份與月份
-            if ref.get('year'):
-                date_str = ref['year']
-                if ref.get('month'):
-                    date_str = f"{ref['month']} {date_str}"
-                st.markdown(f"**📅 年份**")
-                st.markdown(f"　└─ {date_str}")
-            
-            # 文件類型
-            if ref.get('document_type'):
-                st.markdown(f"**📂 文件類型**")
-                st.markdown(f"　└─ {ref['document_type']}")
-            
-            # 電子資源
-            if ref.get('doi'):
-                st.markdown(f"**🔍 DOI**")
-                st.markdown(f"　└─ [{ref['doi']}](https://doi.org/{ref['doi']})")
-            
-            if ref.get('url'):
-                st.markdown(f"**🌐 URL**")
-                st.markdown(f"　└─ [{ref['url']}]({ref['url']})")
-            
-            # 原文
-            st.divider()
-            st.caption("📍 原始參考文獻文字")
-            st.markdown(f"""
-                <div style="
-                    background-color: #f0f2f6;
-                    border-left: 3px solid #1f77b4;
-                    padding: 12px 12px 24px 12px;
-                    border-radius: 4px;
-                    font-family: monospace;
-                    font-size: 14px;
-                    line-height: 1.6;
-                    white-space: pre-wrap;
-                    word-wrap: break-word;
-                    overflow-wrap: break-word;
-                    margin-bottom: 25px;
-                ">
-                {ref['original']}
-                </div>
-                """, unsafe_allow_html=True)
+        # 標題
+        if ref.get('title'):
+            st.markdown(f"**📝 標題**")
+            st.markdown(f"　└─ {ref['title']}")
         
-        with c_action:
-            st.markdown("**🛠️ 操作**")
+        # 書名（若為書籍章節）
+        if ref.get('book_title'):
+            st.markdown(f"**📚 書名**")
+            st.markdown(f"　└─ {ref['book_title']}")
+        
+        # 編輯
+        if ref.get('editors'):
+            st.markdown(f"**✍️ 編輯**")
+            st.markdown(f"　└─ {ref['editors']}")
+        
+        # 來源（會議、期刊、出版社）
+        # 根據格式顯示不同欄位，但保持相同順序
+        if format_type == 'IEEE':
+            source_show = (ref.get('conference_name') or 
+                        ref.get('journal_name') or 
+                        ref.get('source'))
+        else:  # APA
+            source_show = (ref.get('source') or 
+                        ref.get('publisher'))
+
+        if source_show:
+            if ref.get('conference_name'):
+                label = "會議名稱"
+            elif ref.get('journal_name'):
+                label = "期刊名稱"
+            elif ref.get('source'):
+                label = "期刊名稱" if format_type == 'IEEE' else "期刊名稱"
+            elif ref.get('publisher'):
+                label = "出版社"
+            else:
+                label = "來源出處"
+            st.markdown(f"**📖 {label}**")
+            st.markdown(f"　└─ {source_show}")
+        
+        # 卷期
+        if ref.get('volume') or ref.get('issue'):
+            volume_val = ref.get('volume')
+            issue_val = ref.get('issue')
             
+            # 只有當值不是 None 時才處理
+            if volume_val and issue_val:
+                # 判斷期號格式
+                issue_str = str(issue_val)
+                
+                # 檢查是否為純數字、數字範圍（1-2、3–4）、或 "1, 2" 格式
+                is_numeric_issue = bool(
+                    issue_str.isdigit() or 
+                    re.match(r'^\d+[\-–—]\d+$', issue_str) or  # 數字範圍
+                    re.match(r'^\d+,\s*\d+$', issue_str)       # 逗號分隔的數字
+                )
+                
+                if is_numeric_issue:
+                    # 純數字或數字範圍：使用 Vol. X, No. Y 格式
+                    vi_display = f"Vol. {volume_val}, No. {issue_str}"
+                else:
+                    # 包含文字（如 Supplement）：使用 Vol. X(Y) 格式
+                    vi_display = f"Vol. {volume_val}({issue_str})"
+            elif volume_val:
+                vi_display = f"Vol. {volume_val}"
+            elif issue_val:
+                vi_display = f"No. {issue_val}"
+            else:
+                vi_display = None
+            
+            if vi_display:
+                st.markdown(f"**📊 卷期**")
+                st.markdown(f"　└─ {vi_display}")
+        
+        # 版次
+        if ref.get('edition'):
+            st.markdown(f"**📖 版次**")
+            st.markdown(f"　└─ {ref['edition']}")
+
+        # 頁碼/文章編號
+        if ref.get('article_number'):
+            st.markdown(f"**📄 文章編號**")
+            st.markdown(f"　└─ {ref['article_number']}")
+        elif ref.get('pages'):
+            formatted_pages = format_pages_display(ref['pages'])
+            st.markdown(f"**📄 頁碼**")
+            st.markdown(f"　└─ {formatted_pages}")
+        
+        # 年份與月份
+        if ref.get('year'):
+            date_str = ref['year']
+            if ref.get('month'):
+                date_str = f"{ref['month']} {date_str}"
+            st.markdown(f"**📅 年份**")
+            st.markdown(f"　└─ {date_str}")
+        
+        # 文件類型
+        if ref.get('document_type'):
+            st.markdown(f"**📂 文件類型**")
+            st.markdown(f"　└─ {ref['document_type']}")
+        
+        # 電子資源
+        if ref.get('doi'):
+            st.markdown(f"**🔍 DOI**")
+            st.markdown(f"　└─ [{ref['doi']}](https://doi.org/{ref['doi']})")
+        
+        if ref.get('url'):
+            st.markdown(f"**🌐 URL**")
+            st.markdown(f"　└─ [{ref['url']}]({ref['url']})")
+
+        col_title, col_button = st.columns([3, 1])
+        with col_title:
+            st.markdown("**🛠️ 格式轉換**")
+    
+        with col_button:
             # 根據格式顯示不同的轉換按鈕
             if format_type == 'IEEE':
-                if st.button("轉 APA", key=f"ref_to_apa_{index}"):
-                    converted_text = convert_en_ieee_to_apa(ref)
-                    st.markdown(f"""
-                    <div style="
-                        background-color: #f0f2f6;
-                        border-left: 3px solid #28a745;
-                        padding: 12px 12px 24px 12px;
-                        border-radius: 4px;
-                        font-family: monospace;
-                        font-size: 14px;
-                        line-height: 1.6;
-                        white-space: pre-wrap;
-                        word-wrap: break-word;
-                        overflow-wrap: break-word;
-                        margin-bottom: 25px;
-                    ">
-                    {converted_text}
-                    </div>
-                    """, unsafe_allow_html=True)
-            
+                button_clicked = st.button("轉 APA", key=f"ref_to_apa_{index}", use_container_width=True)
             elif format_type == 'APA':
                 if lang == 'EN':
-                    if st.button("轉 IEEE", key=f"ref_to_ieee_{index}"):
-                        converted_text = convert_en_apa_to_ieee(ref)
-                        st.markdown(f"""
-                        <div style="
-                            background-color: #f0f2f6;
-                            border-left: 3px solid #0066cc;
-                            padding: 12px 12px 24px 12px;
-                            border-radius: 4px;
-                            font-family: monospace;
-                            font-size: 14px;
-                            line-height: 1.6;
-                            white-space: pre-wrap;
-                            word-wrap: break-word;
-                            overflow-wrap: break-word;
-                            margin-bottom: 25px;
-                        ">
-                        {converted_text}
-                        </div>
-                        """, unsafe_allow_html=True)
+                    button_clicked = st.button("轉 IEEE", key=f"ref_to_ieee_{index}", use_container_width=True)
                 elif lang == 'ZH':
                     fmt = ref.get('format', '')
                     if 'APA' in fmt:
-                        if st.button("轉編號", key=f"ref_to_num_{index}"):
-                            converted_text = convert_zh_apa_to_num(ref)
-                            st.markdown(f"""
-                            <div style="
-                                background-color: #f0f2f6;
-                                border-left: 3px solid #0066cc;
-                                padding: 12px 12px 24px 12px;
-                                border-radius: 4px;
-                                font-family: monospace;
-                                font-size: 14px;
-                                line-height: 1.6;
-                                white-space: pre-wrap;
-                                word-wrap: break-word;
-                                overflow-wrap: break-word;
-                                margin-bottom: 25px;
-                            ">
-                            {converted_text}
-                            </div>
-                            """, unsafe_allow_html=True)
+                        button_clicked = st.button("轉編號", key=f"ref_to_num_{index}", use_container_width=True)
                     elif 'Numbered' in fmt:
-                        if st.button("轉 APA", key=f"ref_to_apa_{index}"):
-                            converted_text = convert_zh_num_to_apa(ref)
-                            st.markdown(f"""
-                            <div style="
-                                background-color: #f0f2f6;
-                                border-left: 3px solid #28a745;
-                                padding: 12px 12px 24px 12px;
-                                border-radius: 4px;
-                                font-family: monospace;
-                                font-size: 14px;
-                                line-height: 1.6;
-                                white-space: pre-wrap;
-                                word-wrap: break-word;
-                                overflow-wrap: break-word;
-                                margin-bottom: 25px;
-                            ">
-                            {converted_text}
-                            </div>
-                            """, unsafe_allow_html=True)
+                        button_clicked = st.button("轉 APA", key=f"ref_to_apa_{index}", use_container_width=True)
+                    else:
+                        button_clicked = False
+                else:
+                    button_clicked = False
+            else:
+                button_clicked = False
+        
+        # 顯示轉換結果
+        if button_clicked:
+            if format_type == 'IEEE':
+                converted_text = convert_en_ieee_to_apa(ref)
+            elif format_type == 'APA':
+                if lang == 'EN':
+                    converted_text = convert_en_apa_to_ieee(ref)
+                elif lang == 'ZH':
+                    fmt = ref.get('format', '')
+                    if 'APA' in fmt:
+                        converted_text = convert_zh_apa_to_num(ref)
+                    elif 'Numbered' in fmt:
+                        converted_text = convert_zh_num_to_apa(ref)
+            
+            st.code(converted_text, language=None)
+        
+        # 原文
+        st.divider()
+        st.caption("📍 原始參考文獻文字")
+        st.markdown(f"""
+            <div style="
+                background-color: #f0f2f6;
+                border-left: 3px solid #1f77b4;
+                padding: 12px 12px 24px 12px;
+                border-radius: 4px;
+                font-family: monospace;
+                font-size: 14px;
+                line-height: 1.6;
+                white-space: pre-wrap;
+                word-wrap: break-word;
+                overflow-wrap: break-word;
+                margin-bottom: 12px;
+            ">
+            {ref['original']}
+            </div>
+            """, unsafe_allow_html=True)
 
 # ==================== 主區域：檔案上傳 ====================
 
