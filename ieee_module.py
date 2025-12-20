@@ -45,6 +45,7 @@ def parse_ieee_authors(authors_str):
     return parsed_list
 
 
+
 # ===== IEEE 完整解析 =====
 def extract_ieee_reference_full(ref_text):
 
@@ -72,6 +73,7 @@ def extract_ieee_reference_full(ref_text):
         'publisher': None,
         'location': None,
         'edition': None,
+        'editors': None, 
         'url': None,
         'access_date': None,
         'doi': None,
@@ -98,20 +100,21 @@ def extract_ieee_reference_full(ref_text):
         text = re.sub(r'^(?:收錄於|載於|刊於)[:\s]*', '', text)
         text = re.sub(r'^J\.\s+', '', text)
         text = re.sub(r'\[[JCD]\]', '', text) # 移除 [J], [C], [D] 等分類標記
-        
         # 2. 移除電子資源標記 ([Online], Available, Retrieved)
         text = re.sub(r'\[Online\]\.?', '', text, flags=re.IGNORECASE)
         text = re.sub(r'Available:', '', text, flags=re.IGNORECASE)
         text = re.sub(r'Retrieved from', '', text, flags=re.IGNORECASE)
-        
         # 3. 移除存取日期 (accessed ...)
         text = re.sub(r'\(?\s*accessed\.?.*', '', text, flags=re.IGNORECASE)
-        
         # 4. 移除網址殘留 (https://...)
         text = re.sub(r'https?://[^\s]+', '', text)
-        
         # 5. 最終修剪標點與空白
-        return text.strip().strip(',. -;，。')
+        text = text.strip()
+    
+        # 3. 只清理結尾的「逗號、空格、破折號」，但保留句點（期刊縮寫需要）
+        text = re.sub(r'[,\s\-;，]+$', '', text)
+        
+        return text
     
     # === 分流判斷：如果是中文文獻，走新邏輯；如果是英文，走舊邏輯 ===
     if has_chinese(rest_text):
@@ -327,6 +330,29 @@ def extract_ieee_reference_full(ref_text):
             elif author_split:
                 result['authors'] = result['title'][:author_split.start()].strip()
                 result['title'] = result['title'][author_split.start() + 1:].strip()
+        # === [NEW] 提取編輯者 (Editors) ===
+        # 尋找類似 "In: Name1, Name2 (eds)" 的結構
+        # 支援 (eds), (ed.), (eds.), (Ed.), (Eds.)
+        editor_match = re.search(r'\bIn\s*:\s*(.+?)\s*\(?([Ee]ds?\.?)\)?', after_title)
+        
+        if editor_match:
+            # 群組 1 是編輯者姓名字串 (e.g., "Pérez-Solà C., Navarro-Arribas G.")
+            raw_editors = editor_match.group(1).strip()
+            result['editors'] = raw_editors
+            
+            # 您也可以選擇進一步解析編輯者姓名 (類似 parse_ieee_authors)
+            # result['parsed_editors'] = parse_ieee_authors(raw_editors)
+
+            # [重要] 將編輯者資訊從 after_title 中移除，避免干擾後續 Source 解析
+            # 我們移除整段 "In: ... (eds)"
+            start, end = editor_match.span()
+            
+            # 將這段挖掉，用一個空格取代
+            after_title = after_title[:start] + " " + after_title[end:]
+            after_title = after_title.strip()
+            
+            # 有時候 (eds) 後面會緊接書名或會議名，移除後可能會有殘留的標點
+            after_title = after_title.lstrip(',. :')
 
         # [NEW Fix] URL 提取與絕對截斷邏輯 (取代原本零散的 URL replace)
         # 1. 嘗試抓取 Markdown 連結 [text](url)
@@ -485,8 +511,24 @@ def extract_ieee_reference_full(ref_text):
                     if re.search(r'\b(Conference|Symposium|Workshop|Congress|Meeting|Lecture Notes|Proceedings)\b', full_search_text[m.end():m.end()+60], re.IGNORECASE):
                         continue
                 if m.start() < min_pos:
-                    min_pos = m.start()
-                    break
+                # [關鍵修正]：如果切斷點是「月份」，往回檢查是否黏著日期數字 (如 19-20)
+                # 判斷這個 match 是否來自月份 regex
+                    is_month_match = re.search(months_regex, m.group(0), re.IGNORECASE)
+                
+                real_start = m.start()
+                if is_month_match:
+                    # 抓取月份前面的文字
+                    prefix_text = full_search_text[:m.start()]
+                    # 檢查結尾是否有 "19-20 " 或 "19 "
+                    # 允許前面有逗號或空白
+                    date_prefix = re.search(r'(?:^|[\s,])(\d{1,2}(?:[-–]\d{1,2})?)\s*$', prefix_text)
+                    if date_prefix:
+                        # 如果抓到前面的數字，將切斷點 (min_pos) 往前推到數字的開始位置
+                        # date_prefix.start(1) 是群組 1 (數字部分) 在 prefix_text 中的起始位置
+                        real_start = date_prefix.start(1)
+
+                min_pos = real_start
+                break
         
         source_candidate = full_search_text[:min_pos].strip().strip(',. -')
         clean_source = clean_source_text(source_candidate)
@@ -523,37 +565,30 @@ def extract_ieee_reference_full(ref_text):
         # 模式 2: 月 日-日, 年 (March 16-18, 2004)
         date_pattern2 = re.compile(r'\b(' + months_pattern + r')\s+(\d{1,2}(?:[-–]\d{1,2})?),?\s*' + str(result['year']), re.IGNORECASE)
 
-        full_search_text = after_title
-        
+        # ✅ 使用 after_title 來搜尋月份，不要覆蓋 full_search_text
+        temp_search_for_month = after_title
+
         # 嘗試匹配完整日期
         date_match = None
         if result['year']:
-            date_match = date_pattern1.search(full_search_text)
+            date_match = date_pattern1.search(temp_search_for_month)
             if not date_match:
-                date_match = date_pattern2.search(full_search_text)
-        
+                date_match = date_pattern2.search(temp_search_for_month)
         if date_match:
-            # 抓到了完整日期！
             raw_date = date_match.group(0)
-            # 儲存到 month 欄位 (或其他您想存的地方，如 access_date 或新建 date 欄位)
-            # 這裡我們先存到 month，因為通常 IEEE 會把月份和年份分開
-            # 但為了資訊完整，我們可以把整串日期資訊存入 month (除了年份)
-            date_info = raw_date.replace(str(result['year']), '').strip(',. ')
-            result['month'] = date_info
-            
-            # [關鍵] 從字串中切除這個日期，避免它被當作機構名稱或地點
-            start, end = date_match.span()
-            # 為了安全，我們只切除日期部分，年份保留給後續邏輯確認(或也切除)
-            # 這裡選擇切除整串 (因為年份已經在 result['year'] 了)
-            full_search_text = full_search_text[:start] + " " + full_search_text[end:]
-
-        # month_part = r'(?:' + '|'.join(months_list) + r')\.?'
-        # comp_month_match = re.search(r'\b' + month_part + r'\s*[-/–]\s*' + month_part + r'\b', full_search_text, re.IGNORECASE)
-        # if comp_month_match:
-        #     result['month'] = comp_month_match.group(0)
-        # else:
-        #     month_match = re.search(months_regex, full_search_text, re.IGNORECASE)
-        #     if month_match: result['month'] = month_match.group(0)
+            result['month'] = raw_date.replace(str(result['year']), '').strip(',. ')
+            # ❌ 不要再切除 full_search_text！這會破壞後續的 min_pos 切分
+            # start, end = date_match.span()
+            # full_search_text = full_search_text[:start] + " " + full_search_text[end:]
+        else:
+    # 備用：只抓月份單字（同樣從 temp_search_for_month 搜尋）
+            month_part = r'(?:' + '|'.join(months_list) + r')\.?'
+            comp_month_match = re.search(r'\b' + month_part + r'\s*[-/–]\s*' + month_part + r'\b', temp_search_for_month, re.IGNORECASE)
+            if comp_month_match:
+                result['month'] = comp_month_match.group(0)
+            else:
+                month_match = re.search(months_regex, full_search_text, re.IGNORECASE)
+                if month_match: result['month'] = month_match.group(0)
         
         # DOI
         doi_match = re.search(r'(?:doi:|DOI:|https?://doi\.org/)\s*(10\.\d{4,}/[^\s,;\]\)]+)', full_search_text)
@@ -579,25 +614,77 @@ def extract_ieee_reference_full(ref_text):
         acc_match = re.search(r'(?:accessed|retrieved|downloaded)\s+(?:on\s+)?([A-Za-z]+\.?\s+\d{1,2},?\s*\d{4})', full_search_text, re.IGNORECASE)
         if acc_match: result['access_date'] = acc_match.group(1)
 
+        if result.get('source'):
+            src = result['source']
+            cut_indices = []
+
+            def get_match_index(pattern):
+                m = re.search(pattern, src, re.IGNORECASE)
+                if m: return m.start()
+                return None
+
+            # 1. 檢查 Volume (e.g. "vol. 37")
+            if result.get('volume'):
+                p = r'(?:,\s*|\s+)(?:Vol\.?|Volume|卷)\s*' + re.escape(result['volume']) + r'\b'
+                idx = get_match_index(p)
+                if idx is not None: cut_indices.append(idx)
+
+            # 2. 檢查 Issue (e.g. "no. 5")
+            if result.get('issue'):
+                p = r'(?:,\s*|\s+)(?:No\.?|Issue|Num|Number|期)\s*' + re.escape(result['issue']) + r'\b'
+                idx = get_match_index(p)
+                if idx is not None: cut_indices.append(idx)
+
+            # 3. 檢查 Pages (以防 pp. 漏網)
+            if result.get('pages'):
+                start_page = result['pages'].split('-')[0]
+                p = r'(?:,\s*|\s+)(?:pp\.?|Pages?|頁)\s*' + re.escape(start_page)
+                idx = get_match_index(p)
+                if idx is not None: cut_indices.append(idx)
+            
+            # 4. 檢查 Year (強制清除結尾年份)
+            if result.get('year') and len(src) > 20: 
+                p = r'(?:,\s*|\s+)' + re.escape(str(result['year'])) + r'\s*$'
+                idx = get_match_index(p)
+                if idx is not None and idx > 10: cut_indices.append(idx)
+
+            # 5. 檢查殘留月份 (e.g. ", Sept")
+            month_end_match = re.search(r'(?:,\s*|\s+)(' + months_regex + r')[\.\s]*$', src, re.IGNORECASE)
+            if month_end_match:
+                cut_indices.append(month_end_match.start())
+
+            # 執行截斷
+            if cut_indices:
+                min_idx = min(cut_indices)
+                src = src[:min_idx].strip().rstrip(',. -')
+                result['source'] = src
+
+        # 比對 Source 與 Title
         if result.get('source') and result.get('title'):
-        # 移除標點、空白並轉小寫，進行正規化比對
             t_clean = re.sub(r'[\W_]+', '', result['title'].lower())
             s_clean = re.sub(r'[\W_]+', '', result['source'].lower())
-        
-        # 1. 完全相同
-            if t_clean == s_clean:
-                result['source'] = None
-                
-            # 2. 包含關係 (來源包含標題，且長度差異極小)
-            elif t_clean in s_clean:
-                diff_len = len(s_clean) - len(t_clean)
-                if diff_len < 15: # 容許一點點差異 (如 "revised edition")
-                    result['source'] = None
-                    
-            # 3. 標題包含來源
-            elif s_clean in t_clean:
-                result['source'] = None
+            if t_clean == s_clean: result['source'] = None
+            elif t_clean in s_clean and len(s_clean) - len(t_clean) < 15: result['source'] = None
+            elif s_clean in t_clean: result['source'] = None
     # ============================================
+        if result.get('source'):
+    # 重新檢查 full_search_text 來判斷類型
+            if re.search(r'(Proc\.|Proceedings|Conference|Symposium|Workshop)', full_search_text, re.IGNORECASE):
+                result['source_type'] = 'Conference Paper'
+                result['conference_name'] = result['source']
+            elif re.search(r'(vol\.|volume|no\.|number)', full_search_text, re.IGNORECASE):
+                result['source_type'] = 'Journal Article'
+                result['journal_name'] = result['source']  # ✅ 現在使用的是清理後的值
+            elif re.search(r'(Ph\.D\.|M\.S\.|thesis)', full_search_text, re.IGNORECASE):
+                result['source_type'] = 'Thesis/Dissertation'
+            elif re.search(r'(Tech\. Rep\.|Technical Report)', full_search_text, re.IGNORECASE):
+                result['source_type'] = 'Technical Report'
+            elif re.search(r'Patent', full_search_text, re.IGNORECASE):
+                result['source_type'] = 'Patent'
+            elif re.search(r'\[Online\]|Available:|https?://|arxiv\.org', full_search_text, re.IGNORECASE):
+                result['source_type'] = 'Website/Online'
+            elif re.search(r'(Ed\.|Eds\.|edition)', full_search_text, re.IGNORECASE):
+                result['source_type'] = 'Book'
 
     return result
 
@@ -605,7 +692,6 @@ def extract_ieee_reference_full(ref_text):
 # ===== IEEE 斷行合併 =====
 def merge_references_ieee_strict(paragraphs):
     """
-    [NEW from test1204-6] [IEEE 專用模式] 嚴格合併
     只認 [n] 開頭，其他一律視為上一行的延續。
     解決 Mar. 2022 或 斷行 DOI 問題。
     """

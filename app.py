@@ -41,7 +41,7 @@ from storage import (
 
 # ==================== 頁面設定 ====================
 
-st.set_page_config(page_title="文獻檢查系統 V3", layout="wide")
+st.set_page_config(page_title="文獻檢查系統", layout="wide")
 
 # 初始化 session state
 init_session_state()
@@ -53,11 +53,11 @@ st.title("📚 學術文獻引用檢查系統")
 
 st.markdown("""
 ### ✨ 功能特色
-1. ✅ **參考文獻檢查**：檢查文獻是否都被引用
-2. ✅ **內文引用檢查**：檢查內文中的引用是否都對應參考文獻
-3. ✅ **中英文辨識 & 格式轉換**：自動區分中英文、APA/IEEE 互轉
-4. ✅ **深度欄位解析**：精準拆解作者、年份、篇名、DOI
-5. ✅ **生成檢查報表**：輸出完整報告            
+1. ✅ **參考文獻完整性檢查**：比對「參考文獻列表」與「內文引用」，找出遺漏引用與未使用文獻。
+2. ✅ **內文引用一致性檢查**：檢查內文中的作者、年份或編號是否都能正確對應到參考文獻。
+3. ✅ **中英混合與格式自動辨識**：智慧偵測 APA / IEEE / 中文數字編號等格式，並支援中英文文獻混排。
+4. ✅ **深度欄位解析與格式轉換**：精準拆解作者、年份、篇名、期刊／會議名稱、頁碼、DOI、URL，並提供 APA ⇄ IEEE、自編號 ⇄ APA 等互轉。
+5. ✅ **互動式檢查報表與匯出**：在介面中逐筆檢視解析結果與問題項目，並支援資料匯出／匯入以便後續校對與保存         
 """)
 
 st.markdown("---")
@@ -234,7 +234,7 @@ def display_reference_with_details(ref, index, format_type='IEEE'):
             date_str = ref['year']
             if ref.get('month'):
                 date_str = f"{ref['month']} {date_str}"
-            st.markdown(f"**📅 年份**")
+            st.markdown(f"**📅 時間**")
             st.markdown(f"　└─ {date_str}")
         
         # 文件類型
@@ -378,20 +378,24 @@ elif uploaded_file:
         st.session_state.in_text_citations = serializable_citations
         
         # 統計卡片
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3 = st.columns([2, 4, 4])
         
         with col1:
             st.markdown(f"""
             <div style="
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                border-radius: 12px;
-                padding: 24px;
+                background: #FAF0E6;
+                border-radius: 30px;
+                padding: 15px;
                 text-align: center;
-                color: white;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                color: #4B2E1E;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+                height: 160px;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
             ">
-                <div style="font-size: 20px; opacity: 0.9; margin-bottom: 8px;">內文引用總數</div>
-                <div style="font-size: 36px; font-weight: bold;">{len(in_text_citations)}</div>
+                <div style="font-size: 25px; opacity: 0.9; margin-bottom: 5px;; font-weight: bold;">內文引用總數</div>
+                <div style="font-size: 45px; font-weight: bold;">{len(in_text_citations)}</div>
             </div>
             """, unsafe_allow_html=True)
         
@@ -399,15 +403,20 @@ elif uploaded_file:
         with col2:
             st.markdown(f"""
             <div style="
-                background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-                border-radius: 12px;
-                padding: 24px;
+                background: rgba(242, 231, 203, 0.8);
+                border: 3px solid 	#844200;
+                border-radius: 30px;
+                padding: 15px;
                 text-align: center;
-                color: white;
+                color: #761A0A;
                 box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                height: 160px;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
             ">
-                <div style="font-size: 20px; opacity: 0.9; margin-bottom: 8px;">APA 格式引用</div>
-                <div style="font-size: 36px; font-weight: bold;">{apa_count}</div>
+                <div style="font-size: 25px; margin-bottom: 5px;font-weight: bold;">「APA 格式」引用</div>
+                <div style="font-size: 45px; font-weight: bold;">{apa_count}</div>
             </div>
             """, unsafe_allow_html=True)
         
@@ -415,15 +424,20 @@ elif uploaded_file:
         with col3:
             st.markdown(f"""
             <div style="
-                background: linear-gradient(135deg, #0066cc 0%, #0080ff 100%);
-                border-radius: 12px;
-                padding: 24px;
+                background: rgba(242, 231, 203, 0.8);
+                border: 3px solid 	#844200;
+                border-radius: 30px;
+                padding: 15px;
                 text-align: center;
-                color: white;
+                color: #761A0A;
                 box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                height: 160px;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
             ">
-                <div style="font-size: 20px; opacity: 0.9; margin-bottom: 8px;">IEEE 格式引用</div>
-                <div style="font-size: 36px; font-weight: bold;">{ieee_count}</div>
+                <div style="font-size: 25px; margin-bottom: 5px;font-weight: bold;">「IEEE 格式」引用</div>
+                <div style="font-size: 45px; font-weight: bold;">{ieee_count}</div>
             </div>
             """, unsafe_allow_html=True)
         
@@ -470,10 +484,12 @@ elif uploaded_file:
                 break
         
         if is_ieee_mode:
-            st.info("💡 偵測到 IEEE 編號格式，啟用**嚴格分割模式**")
+            st.info("💡 偵測到 IEEE 編號格式")
+            #  st.info("💡 偵測到 IEEE 編號格式，啟用**嚴格分割模式**")
             merged_refs = merge_references_ieee_strict(ref_paras)
         else:
-            st.info("💡 偵測到一般格式 (APA/中文)，啟用**智慧混合模式**")
+            st.info("💡 偵測到 APA 格式")
+            # st.info("💡 偵測到一般格式 (APA/中文)，啟用**智慧混合模式**")
             merged_refs = merge_references_unified(ref_paras)
         
         # 解析參考文獻
@@ -483,20 +499,24 @@ elif uploaded_file:
         st.info(f"成功解析出 {len(parsed_refs)} 筆參考文獻")
         
         # 統計卡片
-        col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3 = st.columns([2, 4, 4])
         
         with col1:
             st.markdown(f"""
             <div style="
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                border-radius: 12px;
-                padding: 20px;
+                background: #FAF0E6;
+                border-radius: 30px;
+                padding: 15px;
                 text-align: center;
-                color: white;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                color: #4B2E1E;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+                height: 160px;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
             ">
-                <div style="font-size: 18px; opacity: 0.9; margin-bottom: 6px;">參考文獻總數</div>
-                <div style="font-size: 28px; font-weight: bold;">{len(parsed_refs)}</div>
+                <div style="font-size: 25px; opacity: 0.9; margin-bottom: 5px;font-weight: bold;">參考文獻總數</div>
+                <div style="font-size: 45px; font-weight: bold;">{len(parsed_refs)}</div>
             </div>
             """, unsafe_allow_html=True)
         
@@ -504,15 +524,20 @@ elif uploaded_file:
         with col2:
             st.markdown(f"""
             <div style="
-                background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-                border-radius: 12px;
-                padding: 20px;
+                background: rgba(242, 231, 203, 0.8);
+                border: 3px solid 	#844200;
+                border-radius: 30px;
+                padding: 15px;
                 text-align: center;
-                color: white;
+                color: #761A0A;
                 box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                height: 160px;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
             ">
-                <div style="font-size: 18px; opacity: 0.9; margin-bottom: 6px;">APA 格式</div>
-                <div style="font-size: 28px; font-weight: bold;">{apa_refs_count}</div>
+                <div style="font-size: 25px; margin-bottom: 5px;font-weight: bold;">「APA」格式</div>
+                <div style="font-size: 45px; font-weight: bold;">{apa_refs_count}</div>
             </div>
             """, unsafe_allow_html=True)
         
@@ -520,47 +545,52 @@ elif uploaded_file:
         with col3:
             st.markdown(f"""
             <div style="
-                background: linear-gradient(135deg, #0066cc 0%, #0080ff 100%);
-                border-radius: 12px;
-                padding: 20px;
+                background: rgba(242, 231, 203, 0.8);
+                border: 3px solid 	#844200;
+                border-radius: 30px;
+                padding: 15px;
                 text-align: center;
-                color: white;
+                color: #761A0A;
                 box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                height: 160px;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
             ">
-                <div style="font-size: 18px; opacity: 0.9; margin-bottom: 6px;">IEEE 格式</div>
-                <div style="font-size: 28px; font-weight: bold;">{ieee_refs_count}</div>
+                <div style="font-size: 25px; margin-bottom: 5px;font-weight: bold;">「IEEE」格式</div>
+                <div style="font-size: 45px; font-weight: bold;">{ieee_refs_count}</div>
             </div>
             """, unsafe_allow_html=True)
         
-        with col4:
-            st.markdown(f"""
-            <div style="
-                background: linear-gradient(135deg, #ff7675 0%, #ff9a3d 100%);
-                border-radius: 12px;
-                padding: 20px;
-                text-align: center;
-                color: white;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            ">
-                <div style="font-size: 18px; opacity: 0.9; margin-bottom: 6px;">其他/混合</div>
-                <div style="font-size: 28px; font-weight: bold;">0</div>
-            </div>
-            """, unsafe_allow_html=True)
+        # with col4:
+        #     st.markdown(f"""
+        #     <div style="
+        #         background: linear-gradient(135deg, #ff7675 0%, #ff9a3d 100%);
+        #         border-radius: 12px;
+        #         padding: 20px;
+        #         text-align: center;
+        #         color: white;
+        #         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        #     ">
+        #         <div style="font-size: 18px; opacity: 0.9; margin-bottom: 6px;">其他/混合</div>
+        #         <div style="font-size: 28px; font-weight: bold;">0</div>
+        #     </div>
+        #     """, unsafe_allow_html=True)
         
-        with col5:
-            st.markdown(f"""
-            <div style="
-                background: linear-gradient(135deg, #95de64 0%, #b3e5fc 100%);
-                border-radius: 12px;
-                padding: 20px;
-                text-align: center;
-                color: #333;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            ">
-                <div style="font-size: 18px; opacity: 0.9; margin-bottom: 6px;">未知格式</div>
-                <div style="font-size: 28px; font-weight: bold;">0</div>
-            </div>
-            """, unsafe_allow_html=True)
+        # with col5:
+        #     st.markdown(f"""
+        #     <div style="
+        #         background: linear-gradient(135deg, #95de64 0%, #b3e5fc 100%);
+        #         border-radius: 12px;
+        #         padding: 20px;
+        #         text-align: center;
+        #         color: #333;
+        #         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        #     ">
+        #         <div style="font-size: 18px; opacity: 0.9; margin-bottom: 6px;">未知格式</div>
+        #         <div style="font-size: 28px; font-weight: bold;">0</div>
+        #     </div>
+        #     """, unsafe_allow_html=True)
         
         st.markdown("---")
         
