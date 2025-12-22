@@ -5,6 +5,8 @@
 import streamlit as st
 import re
 from datetime import datetime
+import json
+import pandas as pd
 
 # 從各模組引入函式
 from common_utils import (
@@ -74,35 +76,36 @@ with st.sidebar:
     st.metric("參考文獻數量", len(st.session_state.reference_list))
     st.metric("已驗證文獻", len(st.session_state.verified_references))
     
-    st.markdown("---")
+    # st.markdown("---")
     
     # 匯出功能
-    st.subheader("📤 匯出資料")
-    if st.button("匯出為 JSON", use_container_width=True):
-        json_data = export_to_json()
-        st.download_button(
-            label="📥 下載 JSON 檔案",
-            data=json_data,
-            file_name=f"citation_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-            mime="application/json",
-            use_container_width=True
-        )
+    # st.subheader("📤 匯出資料")
+    # if st.button("匯出為 JSON", use_container_width=True):
+    #     json_data = export_to_json()
+    #     st.download_button(
+    #         label="📥 下載 JSON 檔案",
+    #         data=json_data,
+    #         file_name=f"citation_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+    #         mime="application/json",
+            
+    #         use_container_width=True
+    #     )
     
-    # 匯入功能
-    st.subheader("📥 匯入資料")
-    uploaded_json = st.file_uploader("上傳 JSON 檔案", type=['json'])
-    if uploaded_json:
-        json_str = uploaded_json.read().decode('utf-8')
-        success, message = import_from_json(json_str)
-        if success:
-            st.session_state.json_imported = True
-            st.success(message)
-        else:
-            st.error(message)
+    # # 匯入功能
+    # st.subheader("📥 匯入資料")
+    # uploaded_json = st.file_uploader("上傳 JSON 檔案", type=['json'])
+    # if uploaded_json:
+    #     json_str = uploaded_json.read().decode('utf-8')
+    #     success, message = import_from_json(json_str)
+    #     if success:
+    #         st.session_state.json_imported = True
+    #         st.success(message)
+    #     else:
+    #         st.error(message)
     
-    # 清除匯入標記
-    if not uploaded_json and 'json_imported' in st.session_state:
-        del st.session_state.json_imported
+    # # 清除匯入標記
+    # if not uploaded_json and 'json_imported' in st.session_state:
+    #     del st.session_state.json_imported
     
     # 清空資料
     st.markdown("---")
@@ -672,7 +675,64 @@ if 'missing_refs' in st.session_state and 'unused_refs' in st.session_state:
         else:
             for i, item in enumerate(st.session_state.unused_refs, 1):
                 st.warning(f"{i}. **{item['original']}**", icon="🗑️")
+                
+    st.markdown("---")
+    st.subheader("📥 匯出比對結果")
 
+    missing_refs = st.session_state.missing_refs
+    unused_refs = st.session_state.unused_refs
+
+    # 先準備好所有資料
+    # ---- 準備 JSON 資料 ----
+    export_obj = {
+        "missing_references": missing_refs,
+        "unused_references": unused_refs,
+    }
+    json_bytes = json.dumps(export_obj, ensure_ascii=False, indent=2).encode("utf-8")
+
+    # ---- 準備 CSV 資料 ----
+    def to_df(items, kind):
+        if not items:
+            return pd.DataFrame(columns=["type", "original", "format", "ref_number", "author", "year"])
+        rows = []
+        for x in items:
+            rows.append({
+                "type": kind,                       # missing / unused
+                "original": x.get("original", ""),
+                "format": x.get("format", ""),
+                "ref_number": x.get("ref_number", ""),
+                "author": x.get("author", ""),
+                "year": x.get("year", ""),
+            })
+        return pd.DataFrame(rows)
+
+    df_missing = to_df(missing_refs, "missing")
+    df_unused = to_df(unused_refs, "unused")
+    df_export = pd.concat([df_missing, df_unused], ignore_index=True)
+    csv_bytes = df_export.to_csv(index=False).encode("utf-8")
+
+    # ---- 顯示下載按鈕 ----
+    col_json, col_csv = st.columns(2)
+
+    with col_json:
+        st.download_button(
+            label="⬇️ 下載 JSON(遺漏 / 未使用文獻)",
+            data=json_bytes,
+            file_name=f"citation_check_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json",
+            use_container_width=True,
+            key="download_json_button"
+        )
+
+    with col_csv:
+        st.download_button(
+            label="⬇️ 下載 CSV(遺漏 / 未使用文獻)",
+            data=csv_bytes,
+            file_name=f"citation_check_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="download_csv_button"
+        )
 
 # ==================== 查看暫存資料 ====================
 
