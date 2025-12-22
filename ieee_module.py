@@ -1,7 +1,12 @@
 import re
 
 # ===== 1. 引入依賴 =====
-from common_utils import normalize_chinese_text, has_chinese
+from common_utils import normalize_chinese_text, has_chinese, normalize_text
+from apa_module import (
+    extract_apa_en_detailed,
+    extract_apa_zh_detailed,
+    find_apa_head,
+)
 
 # ===== IEEE 作者解析 =====
 def parse_ieee_authors(authors_str):
@@ -45,13 +50,63 @@ def parse_ieee_authors(authors_str):
     return parsed_list
 
 
+APA_INLINE_PATTERN = re.compile(
+    r"""
+    ^\s*                      # 開頭空白
+    [^\.]+?                   # 先來一段「看起來像作者」的文字，不含句點
+    \(\d{4}[a-z]?\)\.         # 接 (2018). 或 (2018a).
+    """,
+    re.VERBOSE
+)
 
+def looks_like_inline_apa(rest_text: str) -> bool:
+    """
+    去掉 [n] 後的文字，檢查是否為 APA inline：
+    例：Hwang, G. H., Chen, P. H., ... (2018). InfiniteChain...
+    """
+    s = rest_text.strip()
+
+    # 英文 APA：作者 + (年).
+    if APA_INLINE_PATTERN.match(s):
+        return True
+
+    # 再補一個寬鬆版：作者, ... (年).
+    loose = re.match(r'^[^\.]+?\(\d{4}[a-z]?\)\.', s)
+    if loose:
+        return True
+
+    # 簡單中文 APA：作者（2018）。標題……
+    if has_chinese(s) and re.search(r'（\s*\d{4}\s*）', s):
+        # 要求年份括號出現在前半段，避免誤判正文
+        if s.find('（') < 60:
+            return True
+
+    return False
 # ===== IEEE 完整解析 =====
-def extract_ieee_reference_full(ref_text):
+def extract_ieee_reference_full(ref_text: str) -> dict:
+    ref_text = normalize_text(ref_text)
 
-    # === 0. 基礎預處理 ===
+    # 先解析前面的 [n]，並拿到 rest_text
+    m = re.match(r'^\s*[\[【]\s*(\d+)\s*[】\]]\s*(.*)$', ref_text)
+    if m:
+        ref_number = m.group(1)
+        rest_text = m.group(2).strip()
+    else:
+        ref_number = None
+        rest_text = ref_text
+
+    # ★ 唯一的「編號 + APA」判斷：用去編號後的 rest_text
+    if find_apa_head(rest_text):
+        if has_chinese(rest_text):
+            data = extract_apa_zh_detailed(rest_text)
+        else:
+            data = extract_apa_en_detailed(rest_text)
+        data["ref_number"] = ref_number
+        data["format"] = "IEEE-APA"
+        return data
+
+    # 下面才開始 IEEE 專用 result 初始化與解析
     original_ref_text = ref_text
-    # 為了讓 Regex 能處理中文標點，先做標準化
     ref_text = normalize_chinese_text(ref_text)
     
     # 基本欄位初始化
@@ -90,7 +145,8 @@ def extract_ieee_reference_full(ref_text):
     
     result['ref_number'] = number_match.group(1)
     rest_text = ref_text[number_match.end():].strip()
-    
+
+
     # === 通用清理函式  ===
     def clean_source_text(text):
         if not text: return None

@@ -316,7 +316,12 @@ def extract_apa_en_detailed(ref_text):
             result[field] = re.sub(r'-\s+([a-z])', r'\1', result[field])
             # 模式2: 單純的連字號+空格（備用）
             result[field] = re.sub(r'-\s+', '', result[field])
-
+        if result['parsed_authors']:
+        # 轉成 ["Hwang G. H.", "Chen P. H.", ...]
+            result['authors'] = [
+            f"{a['last']} {a['first']}".strip()
+            for a in result['parsed_authors']
+        ]
     return result
 
 # ===== 中文 APA =====
@@ -844,38 +849,6 @@ def convert_zh_num_to_apa(data):
     
     return "。".join(parts) + "。"
 
-# ===== 核心整合 =====
-def process_single_reference(ref_text):
-    """
-    [Updated] 核心分流邏輯
-    策略：優先判斷是否為編號格式 ([1]...), 若是則一律交給 IEEE 模組 (中英文通用)。
-    """
-    ref_text = normalize_text(ref_text)
-    
-    # 1. 優先判斷：是否為編號格式 ([1], [2], 【1】...)
-    # 只要是編號開頭，不管中英文，全部視為 IEEE 格式
-    
-    if re.match(r'^\s*[\[【]', ref_text):
-        # 呼叫您剛剛更新過、中英文通吃的 IEEE 解析器
-        data = extract_ieee_reference_full(ref_text)
-        # 這個解析器回傳的 data['format'] 預設就是 'IEEE'
-        
-    else:
-        # 2. 非編號格式 (APA 類)，再根據語言分流
-        if has_chinese(ref_text):
-            data = extract_apa_zh_detailed(ref_text)
-        else:
-            data = extract_apa_en_detailed(ref_text)
-            
-    # [關鍵整合]：確保回傳的字典包含比對邏輯所需的 'author' 欄位
-    if isinstance(data.get('authors'), list):
-        data['author'] = " ".join(data['authors']) 
-    elif isinstance(data.get('authors'), str):
-        data['author'] = data['authors']
-    else:
-        data['author'] = "Unknown"
-        
-    return data
 
 
 # 引入：
@@ -884,6 +857,5 @@ from common_utils import (
     normalize_text,
     has_chinese,
     extract_doi,
-    is_valid_year
+    is_valid_year,
 )
-from ieee_module import extract_ieee_reference_full

@@ -1,7 +1,7 @@
 """
 學術文獻引用檢查系統 - 主程式
 """
-
+from reference_router import process_single_reference
 import streamlit as st
 import re
 from datetime import datetime
@@ -16,6 +16,7 @@ from common_utils import (
     extract_in_text_citations
 )
 
+
 from ieee_module import (
     merge_references_ieee_strict,
     convert_en_ieee_to_apa
@@ -23,7 +24,6 @@ from ieee_module import (
 
 from apa_module import (
     merge_references_unified,
-    process_single_reference,
     convert_en_apa_to_ieee,
     convert_zh_apa_to_num,
     convert_zh_num_to_apa,
@@ -500,7 +500,20 @@ elif uploaded_file:
         st.session_state.reference_list = parsed_refs
         
         st.info(f"成功解析出 {len(parsed_refs)} 筆參考文獻")
-        
+        apa_refs = []
+        ieee_refs = []
+        for r in parsed_refs:
+            if r.get('ref_number'):
+                ieee_refs.append(r)   # 有編號 → 一律算 IEEE
+            else:
+                fmt = str(r.get('format', ''))
+                if fmt.startswith('APA'):
+                    apa_refs.append(r)
+                else:
+                    ieee_refs.append(r)
+
+        apa_refs_count = len(apa_refs)
+        ieee_refs_count = len(ieee_refs)
         # 統計卡片
         col1, col2, col3 = st.columns([2, 4, 4])
         
@@ -523,7 +536,7 @@ elif uploaded_file:
             </div>
             """, unsafe_allow_html=True)
         
-        apa_refs_count = sum(1 for r in parsed_refs if 'APA' in r.get('format', ''))
+        # apa_refs_count = sum(1 for r in parsed_refs if 'APA' in r.get('format', ''))
         with col2:
             st.markdown(f"""
             <div style="
@@ -544,7 +557,7 @@ elif uploaded_file:
             </div>
             """, unsafe_allow_html=True)
         
-        ieee_refs_count = sum(1 for r in parsed_refs if 'IEEE' in r.get('format', ''))
+        # ieee_refs_count = sum(1 for r in parsed_refs if 'IEEE' in r.get('format', ''))
         with col3:
             st.markdown(f"""
             <div style="
@@ -599,7 +612,7 @@ elif uploaded_file:
         
         # IEEE 參考文獻展示
         st.markdown("### 📖 IEEE 格式參考文獻")
-        ieee_list = [ref for ref in parsed_refs if 'IEEE' in ref.get('format', '')]
+        ieee_list = ieee_refs
         if ieee_list:
             for i, ref in enumerate(ieee_list, 1):
                 display_reference_with_details(ref, i, format_type='IEEE')
@@ -610,7 +623,7 @@ elif uploaded_file:
 
         # APA 參考文獻展示
         st.markdown("### 📚 APA 與其他格式參考文獻")
-        apa_list = [ref for ref in parsed_refs if 'APA' in ref.get('format', '') or 'Numbered' in ref.get('format', '')]
+        apa_list =  apa_refs
         if apa_list:
             for i, ref in enumerate(apa_list, 1):
                 display_reference_with_details(ref, i , format_type='APA') 
