@@ -33,11 +33,7 @@ from apa_module import (
 from checker import check_references
 
 from storage import (
-    init_session_state,
-    save_to_session,
-    export_to_json,
-    import_from_json,
-    add_verified_reference
+    init_session_state
 )
 
 
@@ -75,37 +71,6 @@ with st.sidebar:
     st.metric("內文引用數量", len(st.session_state.in_text_citations))
     st.metric("參考文獻數量", len(st.session_state.reference_list))
     st.metric("已驗證文獻", len(st.session_state.verified_references))
-    
-    # st.markdown("---")
-    
-    # 匯出功能
-    # st.subheader("📤 匯出資料")
-    # if st.button("匯出為 JSON", use_container_width=True):
-    #     json_data = export_to_json()
-    #     st.download_button(
-    #         label="📥 下載 JSON 檔案",
-    #         data=json_data,
-    #         file_name=f"citation_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-    #         mime="application/json",
-            
-    #         use_container_width=True
-    #     )
-    
-    # # 匯入功能
-    # st.subheader("📥 匯入資料")
-    # uploaded_json = st.file_uploader("上傳 JSON 檔案", type=['json'])
-    # if uploaded_json:
-    #     json_str = uploaded_json.read().decode('utf-8')
-    #     success, message = import_from_json(json_str)
-    #     if success:
-    #         st.session_state.json_imported = True
-    #         st.success(message)
-    #     else:
-    #         st.error(message)
-    
-    # # 清除匯入標記
-    # if not uploaded_json and 'json_imported' in st.session_state:
-    #     del st.session_state.json_imported
     
     # 清空資料
     st.markdown("---")
@@ -324,13 +289,17 @@ if not uploaded_file and (st.session_state.in_text_citations or st.session_state
     st.info("📥 顯示已匯入的資料")
 
 elif uploaded_file:
-    # 清空舊資料
-    st.session_state.in_text_citations = []
-    st.session_state.reference_list = []
-    if 'missing_refs' in st.session_state:
-        del st.session_state.missing_refs
-    if 'unused_refs' in st.session_state:
-        del st.session_state.unused_refs
+    # 檢查是否為新檔案（透過檔案名稱和大小判斷）
+    current_file_id = f"{uploaded_file.name}_{uploaded_file.size}"
+    
+    if st.session_state.get('last_file_id') != current_file_id:
+        # 是新檔案，清空所有資料
+        st.session_state.in_text_citations = []
+        st.session_state.reference_list = []
+        st.session_state.missing_refs = []
+        st.session_state.unused_refs = []
+        st.session_state.comparison_done = False
+        st.session_state.last_file_id = current_file_id
 
     file_ext = uploaded_file.name.split(".")[-1].lower()
     
