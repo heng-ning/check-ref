@@ -131,8 +131,12 @@ def extract_apa_en_detailed(ref_text):
     content_part = content_part.lstrip('., ').strip()
 
     if result['doi']:
-        content_part = re.sub(r'(?:doi:|DOI:|https?://doi\.org/)\s*10\.\d{4,}/[^\s。]+', '', content_part).strip()
-
+        # 移除 DOI（支援斷行情況）
+        content_part = re.sub(r'(?:doi:|DOI:|https?://doi\.org/)\s*10\.\d{4,}/[^\s。]+', '', content_part)
+        # 清理 DOI 斷行造成的殘留片段（如 "5887-2"）
+        content_part = re.sub(r'\s+\d+[\-–]\d+\s*$', '', content_part)
+        content_part = content_part.strip()
+        
     if result['url']:
         if url_match:
             original_url_text = url_match.group(0)
@@ -171,17 +175,26 @@ def extract_apa_en_detailed(ref_text):
                             is_book = True
 
     meta_match = re.search(
-        r',\s*(\d+)(?:\s*\(([^)]+)\))?(?:,\s*([A-Za-z]?\d+(?:[\–\-]\s*[A-Za-z]?\d+)?))?(?:\.|\s|$)', 
+        r',\s*(\d+(?:[\–\-]\d+)?)(?:\s*\(([^)]+)\))?(?:,\s*(Article\s+\d+|[A-Za-z]?\d+(?:[\–\-]\s*[A-Za-z]?\d+)?))?(?:\.|\s|$)', 
         content_part
     )
 
     if meta_match:
-        result['volume'] = meta_match.group(1)
+        volume_val = meta_match.group(1)
+        # 處理卷號範圍（如 7-8）
+        if '–' in volume_val or '-' in volume_val:
+            result['volume'] = volume_val
+        else:
+            result['volume'] = volume_val
+        
         result['issue'] = meta_match.group(2) if meta_match.group(2) else None
         pages_or_article = meta_match.group(3)
         
         if pages_or_article and pages_or_article.strip():
-            if '-' in pages_or_article or '–' in pages_or_article:
+            # 優先判斷 Article Number
+            if pages_or_article.startswith('Article '):
+                result['article_number'] = pages_or_article
+            elif '-' in pages_or_article or '–' in pages_or_article:
                 result['pages'] = pages_or_article
             else:
                 if pages_or_article.isdigit():
@@ -603,7 +616,11 @@ def convert_en_apa_to_ieee(data):
                     else:
                         volume_str = f"vol. {data['volume']}({issue_val})"
                 parts.append(volume_str + ",")
-            if data.get('pages'):
+            
+            # 優先處理 article_number，否則處理 pages
+            if data.get('article_number'):
+                parts.append(f"{data['article_number']},")
+            elif data.get('pages'):
                 pages_val = data['pages']
                 if re.search(r'[A-Za-z]', pages_val):
                     parts.append(f"{pages_val},")

@@ -197,7 +197,8 @@ def display_reference_with_details(ref, index, format_type='IEEE'):
         if ref.get('article_number'):
             st.markdown(f"**📄 文章編號**")
             st.markdown(f"　└─ {ref['article_number']}")
-        elif ref.get('pages'):
+        
+        if ref.get('pages'):
             formatted_pages = format_pages_display(ref['pages'])
             st.markdown(f"**📄 頁碼**")
             st.markdown(f"　└─ {formatted_pages}")
