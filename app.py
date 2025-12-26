@@ -650,27 +650,33 @@ if st.button("開始交叉比對", type="primary", use_container_width=True):
             
             st.session_state.missing_refs = missing
             st.session_state.unused_refs = unused
+            st.session_state.comparison_done = True
             
             st.success("✅ 比對完成！")
 
 
 # ==================== 顯示比對結果 ====================
 
-if 'missing_refs' in st.session_state and 'unused_refs' in st.session_state:
+if st.session_state.get('comparison_done', False):
     st.subheader("📊 比對結果報告")
     
+    missing_count = len(st.session_state.get('missing_refs', []))
+    unused_count = len(st.session_state.get('unused_refs', []))
+
     tab1, tab2 = st.tabs([
-        f"❌ 遺漏的參考文獻 ({len(st.session_state.missing_refs)})", 
-        f"⚠️ 未使用的參考文獻 ({len(st.session_state.unused_refs)})"
+        f"❌ 遺漏的參考文獻 ({missing_count})", 
+        f"⚠️ 未使用的參考文獻 ({unused_count})"
     ])
     
     with tab1:
         st.caption("💡 說明：這些引用出現在內文中，但在參考文獻列表裡找不到對應項目。")
 
-        if not st.session_state.missing_refs:
+        missing_refs = st.session_state.get('missing_refs', [])
+        
+        if not missing_refs:
             st.success("太棒了！所有內文引用都在參考文獻列表中找到了。")
         else:
-            for i, item in enumerate(st.session_state.missing_refs, 1):
+            for i, item in enumerate(missing_refs, 1):
                 if item.get('error_type') == 'year_mismatch':
                     st.warning(
                         f"{i}. **{item['original']}** (格式: {item['format']})\n\n"
@@ -683,17 +689,20 @@ if 'missing_refs' in st.session_state and 'unused_refs' in st.session_state:
 
     with tab2:
         st.caption("💡 說明：這些文獻列在參考文獻列表中，但在內文中從未被引用過。")
-        if not st.session_state.unused_refs:
+        
+        unused_refs = st.session_state.get('unused_refs', [])
+        
+        if not unused_refs:
             st.success("太棒了！所有參考文獻都在內文中被有效引用。")
         else:
-            for i, item in enumerate(st.session_state.unused_refs, 1):
+            for i, item in enumerate(unused_refs, 1):
                 st.warning(f"{i}. **{item['original']}**", icon="🗑️")
                 
     st.markdown("---")
     st.subheader("📥 匯出比對結果")
 
-    missing_refs = st.session_state.missing_refs
-    unused_refs = st.session_state.unused_refs
+    missing_refs = st.session_state.get('missing_refs', [])
+    unused_refs = st.session_state.get('unused_refs', [])  
 
     # 先準備好所有資料
     # ---- 準備 JSON 資料 ----

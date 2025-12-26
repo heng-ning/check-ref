@@ -10,6 +10,12 @@ def init_session_state():
     # 儲存已透過 API 驗證過的正確文獻
     if 'verified_references' not in st.session_state:
         st.session_state.verified_references = []
+    if 'missing_refs' not in st.session_state:
+        st.session_state.missing_refs = []
+    if 'unused_refs' not in st.session_state:
+        st.session_state.unused_refs = []
+    if 'comparison_done' not in st.session_state:
+        st.session_state.comparison_done = False
 
 def save_to_session(in_text_citations, reference_list):
     """將資料儲存到 session state"""
