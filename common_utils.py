@@ -213,6 +213,10 @@ def extract_reference_section_improved(paragraphs):
         if is_reference_heading_flexible(para):
             continue
 
+        # 3. 過濾掉單獨的頁碼 (如 "59", "60")
+        if re.match(r'^\d{1,3}\s*$', para):
+            continue
+
         final_refs.append(para)
 
     return final_refs, ref_keyword, "增強版標題識別(含斷行)"

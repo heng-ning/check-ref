@@ -65,6 +65,7 @@ def extract_apa_en_detailed(ref_text):
         'publisher': None,
         'editors': None,
         'book_title': None,
+        'proceedings_title': None,
         'edition': None,
         'source_type': None,
         'document_type': None,
@@ -170,7 +171,7 @@ def extract_apa_en_detailed(ref_text):
                             is_book = True
 
     meta_match = re.search(
-        r',\s*(\d+)(?:\s*\(([^)]+)\))?(?:,\s*([A-Za-z]?\d+(?:[\–\-][A-Za-z]?\d+)?))?(?:\.|\s|$)', 
+        r',\s*(\d+)(?:\s*\(([^)]+)\))?(?:,\s*([A-Za-z]?\d+(?:[\–\-]\s*[A-Za-z]?\d+)?))?(?:\.|\s|$)', 
         content_part
     )
 
@@ -195,13 +196,31 @@ def extract_apa_en_detailed(ref_text):
                         result['article_number'] = pages_or_article
         
         title_source_part = content_part[:meta_match.start()].strip()
+        title_source_part = title_source_part.rstrip(',，。. ') # 移除尾部標點
     else:
-        pp_match = re.search(r',?\s*pp?\.?\s*([A-Za-z]?\d+[\–\-][A-Za-z]?\d+)(?:\.)?$', content_part)
+        pp_match = re.search(r',?\s*pp?\.?\s*([A-Za-z]?\d+[\–\-]\s*[A-Za-z]?\d+)(?:\.)?$', content_part)
         if pp_match:
             result['pages'] = pp_match.group(1)
             title_source_part = content_part[:pp_match.start()].strip()
         else:
+            # 移除 DOI/URL 後的內容作為 title_source_part
             title_source_part = content_part
+            
+            # 如果有 DOI，移除它
+            if result.get('doi'):
+                title_source_part = re.sub(
+                    r'(?:doi:|DOI:|https?://doi\.org/)\s*10\.\d{4,}/[^\s。]+.*$',
+                    '',
+                    title_source_part
+                ).strip()
+            
+            # 如果有 URL，移除它
+            if result.get('url'):
+                title_source_part = re.sub(
+                    r'https?://[^\s]+.*$',
+                    '',
+                    title_source_part
+                ).strip()
 
     if is_book:
         chapter_match = re.search(
@@ -249,16 +268,48 @@ def extract_apa_en_detailed(ref_text):
                 '. ' + 
                 title_source_part[doc_type_match.end():]
             ).strip()
-        
-        split_index = title_source_part.rfind('. ')
-        if split_index != -1:
-            result['title'] = title_source_part[:split_index].strip()
-            result['source'] = title_source_part[split_index + 1:].strip().rstrip('.')
-        else:
-            if not title_source_part.startswith('http'):
-                result['title'] = title_source_part.rstrip('.')
 
-    text_fields = ['title', 'source', 'publisher', 'editors', 'book_title', 'journal_name', 'conference_name']
+        # 處理會議論文集格式（In ... (pp. ...))
+        proceedings_match = re.search(
+            r'^(.+?)\.\s+In\s+(.+?)\s*\(pp\.\s*([\d\s\–\-—]+)\)',
+            title_source_part,
+            re.IGNORECASE
+        )
+        
+        if proceedings_match:
+            result['title'] = proceedings_match.group(1).strip()
+            result['proceedings_title'] = proceedings_match.group(2).strip()
+            result['pages'] = re.sub(r'\s+', '', proceedings_match.group(3).strip())
+            result['source_type'] = 'Conference Paper'
+            
+            # 處理後續的出版社資訊
+            after_proceedings = title_source_part[proceedings_match.end():].strip().lstrip('. ').strip()
+            if after_proceedings:
+                # 移除開頭的句號和空格
+                after_proceedings = re.sub(r'^\.\s*', '', after_proceedings)
+                result['publisher'] = after_proceedings.rstrip('.')
+        else:
+            # 不是會議論文，進行標題與期刊分割
+            # 優先尋找「. 大寫字母」作為標題與期刊的分界
+            split_match = re.search(r'\.\s+([A-Z])', title_source_part)
+            if split_match:
+                split_pos = split_match.start()
+                result['title'] = title_source_part[:split_pos].strip()
+                result['source'] = title_source_part[split_match.end() - 1:].strip().rstrip('.')
+            else:
+                # 若找不到明確分界，整串視為標題
+                if not title_source_part.startswith('http'):
+                    result['title'] = title_source_part.rstrip('.')
+            
+            # 如果 source 中仍然包含卷期頁碼模式，則移除
+            if result.get('source') and result.get('volume'):
+                result['source'] = re.sub(
+                    r',\s*\d+\s*(?:\([^)]+\))?\s*(?:,\s*[A-Za-z]?\d+(?:[\–\-]\s*[A-Za-z]?\d+)?)?$',
+                    '',
+                    result['source']
+                ).strip()
+
+    text_fields = ['title', 'source', 'publisher', 'editors', 'book_title', 'proceedings_title', 'journal_name', 'conference_name']
     for field in text_fields:
         if result.get(field) and isinstance(result[field], str):
             result[field] = re.sub(r'-\s+([a-z])', r'\1', result[field])
@@ -441,17 +492,23 @@ def merge_references_unified(paragraphs):
         elif re.match(r'^[A-Z][^\d\(\)]+(\(|\,\s*)\d{4}', para) and not re.match(r'^\s*(&|and)\b', para, re.IGNORECASE):
             is_new_start = True
             
-        # C. 編號開頭 (修正：避免把文章編號 101599. 誤判為列表編號)
+        # C. 法規文獻（標題開頭 + 括號日期）
+        elif re.match(r'^[\u4e00-\u9fa5]+.*?[\(（]\d{4}\s*年', para):
+            is_new_start = True
+
+        # D. 編號開頭 (修正：避免文章編號與頁碼誤判)
         elif re.match(r'^(\d+)\.', para):
-            # 抓出數字
             num_match = re.match(r'^(\d+)', para)
             num_val = int(num_match.group(1))
             
-            # [FIX] 防呆條件 1: 數字 > 500 通常是文章編號，不是列表順序
+            # 防呆條件 1: 數字 > 500 通常是文章編號
             if num_val > 500:
                 is_new_start = False
-            # [FIX] 防呆條件 2: 數字後面緊接 DOI 或 URL
+            # 防呆條件 2: 數字後面緊接 DOI 或 URL
             elif re.search(r'^\d+\.\s*(https?://|doi:)', para, re.IGNORECASE):
+                is_new_start = False
+            # 防呆條件 3: 純粹只有數字+句號（如 "162."），可能是頁碼
+            elif re.match(r'^\d{1,3}\.\s*$', para):
                 is_new_start = False
             else:
                 is_new_start = True
@@ -527,6 +584,13 @@ def convert_en_apa_to_ieee(data):
         if data.get('publisher'): parts.append(f"{data['publisher']},")
         if data.get('year'): parts.append(f"{data['year']},")
         if data.get('pages'): parts.append(f"pp. {data['pages']}.")
+    elif data.get('source_type') == 'Conference Paper':
+        # 會議論文集格式轉換
+        if data.get('proceedings_title'): 
+            parts.append(f"in {data['proceedings_title']},")
+        if data.get('year'): parts.append(f"{data['year']},")
+        if data.get('pages'): parts.append(f"pp. {data['pages']}.")
+        if data.get('publisher'): parts.append(f"{data['publisher']}.")
     else:
         if data.get('source'):
             parts.append(f"{data['source']},")

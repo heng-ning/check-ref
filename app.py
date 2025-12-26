@@ -119,6 +119,11 @@ def display_reference_with_details(ref, index, format_type='IEEE'):
         if ref.get('book_title'):
             st.markdown(f"**📚 書名**")
             st.markdown(f"　└─ {ref['book_title']}")
+
+        # 論文集名稱（若為會議論文）
+        if ref.get('proceedings_title'):
+            st.markdown(f"**📄 論文集名稱**")
+            st.markdown(f"　└─ In {ref['proceedings_title']}")
         
         # 編輯
         if ref.get('editors'):
