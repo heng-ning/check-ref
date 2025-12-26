@@ -271,35 +271,81 @@ def extract_in_text_citations(content_paragraphs):
     citations = []
     citation_ids = set()
     
-    # --- APA 括號式: (作者, 年份) ---
+    # 先處理多引用格式，再處理單一引用
+    
+    # --- 1. 先處理 APA 多引用: (作者1, 年份1; 作者2, 年份2) ---
+    pattern_apa_multi = re.compile(
+        r'[（(]\s*([^)）]+?[;；][^)）]+?)\s*[）)]',  # ← 強制要求有分號
+        re.UNICODE
+    )
+    for match in pattern_apa_multi.finditer(full_text):
+        inner_text = match.group(1)
+        segments = re.split(r'\s*[;；]\s*', inner_text)
+        
+        if len(segments) > 1:
+            citation_id_check = f"{match.start()}-{match.end()}"
+            if citation_id_check in citation_ids:
+                continue
+                
+            for idx, seg in enumerate(segments):
+                seg_match = re.match(
+                    r'([\w\s\u4e00-\u9fff&,、-]+?(?:\s+(?:et\s*al\.?|等))?)\s*[,，]\s*(\d{4}[a-z]?)', 
+                    seg.strip()
+                )
+                if seg_match:
+                    author = seg_match.group(1).strip()
+                    year = seg_match.group(2)[:4]
+                    
+                    if not author.isdigit() and is_valid_year(year):
+                        citation_id = f"{match.start()}-multi-{idx}"
+                        if citation_id not in citation_ids:
+                            normalized = normalize_citation_for_matching(seg.strip())
+                            citations.append({
+                                'author': author,
+                                'co_author': None,
+                                'year': year,
+                                'original': match.group(0),
+                                'normalized': normalized,
+                                'position': match.start(),
+                                'type': 'APA-parenthetical-multi',
+                                'format': 'APA'
+                            })
+                            citation_ids.add(citation_id)
+            
+            citation_ids.add(f"{match.start()}-{match.end()}")
+    
+    # --- 2. 再處理 APA 單一括號式: (作者, 年份) ---
     pattern_apa1 = re.compile(
         r'(?<![0-9])[（(]\s*([\w\s\u4e00-\u9fff-]+?)\s*(?:(?:&|and|與|、)\s*([\w\s\u4e00-\u9fff-]+?))?\s*'
         r'(?:,?\s*et\s*al\.?)?\s*[,，]\s*(\d{4}[a-z]?)\s*[）)]',
         re.UNICODE | re.IGNORECASE
     )
     for match in pattern_apa1.finditer(full_text):
+        citation_id = f"{match.start()}-{match.end()}"
+        if citation_id in citation_ids:  # ← 跳過已處理的
+            continue
+            
         author1 = match.group(1).strip()
         author2 = match.group(2).strip() if match.group(2) else None
         year = match.group(3)[:4]
         
-        if author1.isdigit(): continue
+        if author1.isdigit(): 
+            continue
         
         if is_valid_year(year):
-            citation_id = f"{match.start()}-{match.end()}"
-            if citation_id not in citation_ids:
-                normalized = normalize_citation_for_matching(match.group(0))
-                citations.append({
-                    'author': author1,
-                    'co_author': author2,
-                    'year': year,
-                    'original': match.group(0),
-                    'normalized': normalized,
-                    'position': match.start(),
-                    'type': 'APA-parenthetical',
-                    'format': 'APA'
-                })
-                citation_ids.add(citation_id)
-    
+            normalized = normalize_citation_for_matching(match.group(0))
+            citations.append({
+                'author': author1,
+                'co_author': author2,
+                'year': year,
+                'original': match.group(0),
+                'normalized': normalized,
+                'position': match.start(),
+                'type': 'APA-parenthetical',
+                'format': 'APA'
+            })
+            citation_ids.add(citation_id)
+
     # --- APA 敘述式: 作者 (年份) ---
     pattern_apa2 = re.compile(
         r'(?<![0-9])([\w\u4e00-\u9fff]+(?:\s+(?:et\s*al\.?|等))?)\s*[（(]\s*(\d{4}[a-z]?)\s*[）)]',

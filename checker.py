@@ -34,8 +34,9 @@ def check_references(in_text_citations, reference_list):
 
     matched_indices = set()
     missing_in_refs = []
+    year_mismatch_map = {}  # 記錄疑似年份錯誤 {ref_index: [引用列表]}
 
-    # --- 1. 建立參考文獻的編號查找表 (針對 IEEE 格式加速查找) ---
+    # --- 1. 建立參考文獻的編號查找表 ---
     ref_map_by_id = {}
     for i, ref in enumerate(reference_list):
         if ref.get('ref_number'):
@@ -45,62 +46,68 @@ def check_references(in_text_citations, reference_list):
     # --- 2. 遍歷內文引用 ---
     for cit in in_text_citations:
         is_found = False
-        potential_year_error_hint = None # 用來記錄疑似正確的年份
+        potential_ref_index = None  # 記錄疑似對應的參考文獻索引
         
-        # 路徑 A: IEEE 格式引用 (優先用編號查，最準)
+        # 路徑 A: IEEE 格式引用
         if cit.get('ref_number'):
             cit_num = str(cit['ref_number']).strip()
             if cit_num in ref_map_by_id:
                 is_found = True
                 matched_indices.add(ref_map_by_id[cit_num])
         
-        # 路徑 B: APA 格式引用 (用 "核心姓氏 + 年份" 掃描原始文字)
+        # 路徑 B: APA 格式引用
         if not is_found and cit.get('author') and cit.get('year'):
-            # 準備特徵值
-            cit_year = ''.join(filter(str.isdigit, str(cit['year']))) # 例如 "2022"
-            cit_auth_core = get_core_author_name(cit['author'])       # 例如 "yuanjiang"
+            cit_year = ''.join(filter(str.isdigit, str(cit['year'])))
+            cit_auth_core = get_core_author_name(cit['author'])
             
-            # 只有當提取出有效的作者和年份時才進行比對
             if cit_year and cit_auth_core:
-                found_for_this_citation = False  # 用來標記這筆引用是否至少找到一個對象
+                found_for_this_citation = False
                 
                 for i, ref in enumerate(reference_list):
-                    # 獲取參考文獻的原始文字 (包含所有資訊)
                     ref_original = str(ref.get('original', '')).lower()
                     ref_original_clean = clean_ref_text(ref_original)
                     
-                    # 步驟 1: 檢查「核心姓氏」是否出現在參考文獻中
+                    # 步驟 1: 檢查作者
                     if cit_auth_core in ref_original_clean:
-                        # 步驟 2: 如果作者對了，再檢查「年份」是否也存在
+                        # 步驟 2: 檢查年份
                         if cit_year in ref_original:
                             is_found = True
                             found_for_this_citation = True
                             matched_indices.add(i)
-                            # [修正] 移除 break！
-                            # 讓它繼續往下找，因為可能有第二篇同作者同年份的文章
-                            # break 
                         else:
-                            # (原本的年份提示邏輯保持不變)
-                            # 但要注意，如果已經 found_for_this_citation = True，這個提示就不重要了
+                            # 作者對但年份錯：記錄到 year_mismatch_map
                             if not found_for_this_citation:
+                                potential_ref_index = i
                                 years_in_ref = re.findall(r'(19\d{2}|20\d{2})', ref_original)
-                                if years_in_ref and not potential_year_error_hint:
-                                    potential_year_error_hint = years_in_ref[0]
+                                
+                                if years_in_ref:
+                                    if i not in year_mismatch_map:
+                                        year_mismatch_map[i] = []
+                                    
+                                    year_mismatch_map[i].append({
+                                        'citation': cit.get('original'),
+                                        'cited_year': cit_year,
+                                        'correct_year': years_in_ref[0]
+                                    })
         
-        if not is_found:
-            # 標記錯誤類型，方便前端 UI 顯示不同提示
-            if potential_year_error_hint:
-                cit['error_type'] = 'year_mismatch'
-                cit['year_hint'] = potential_year_error_hint
-            else:
-                cit['error_type'] = 'missing'
-            
+        # 只有「完全找不到」才算遺漏
+        if not is_found and potential_ref_index is None:
+            cit['error_type'] = 'missing'
             missing_in_refs.append(cit)
 
-    # --- 3. 找出未使用的參考文獻 ---
+    # --- 3. 找出未使用的參考文獻，並標註疑似年份錯誤 ---
     unused_refs = []
+    year_error_refs = []  # 存放年份錯誤的文獻
+
     for i, ref in enumerate(reference_list):
         if i not in matched_indices:
-            unused_refs.append(ref)
+            ref_info = ref.copy()
             
-    return missing_in_refs, unused_refs
+            # 檢查是否有年份錯誤紀錄
+            if i in year_mismatch_map:
+                ref_info['year_mismatch'] = year_mismatch_map[i]
+                year_error_refs.append(ref_info)
+            else:
+                unused_refs.append(ref_info)
+
+    return missing_in_refs, unused_refs, year_error_refs
