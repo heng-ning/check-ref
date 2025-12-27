@@ -1,52 +1,25 @@
-"""
-學術文獻引用檢查系統 - 主程式
-"""
-from reference_router import process_single_reference
 import streamlit as st
-import re
-from datetime import datetime
-import json
-import pandas as pd
 
-# 從各模組引入函式
-from common_utils import (
-    extract_paragraphs_from_docx,
-    extract_paragraphs_from_pdf,
-    classify_document_sections,
-    extract_in_text_citations
+# 引入模組
+from storage import init_session_state
+from utils.section_detector import classify_document_sections
+from ui.file_upload import (
+    handle_file_upload,
+    display_citation_analysis,
+    display_reference_parsing
 )
-
-
-from ieee_module import (
-    merge_references_ieee_strict,
-    convert_en_ieee_to_apa
+from ui.comparison_ui import (
+    display_comparison_button,
+    display_comparison_results
 )
-
-from apa_module import (
-    merge_references_unified,
-    convert_en_apa_to_ieee,
-    convert_zh_apa_to_num,
-    convert_zh_num_to_apa,
-    format_pages_display
-)
-
-from checker import check_references
-
-from storage import (
-    init_session_state
-)
-
 
 # ==================== 頁面設定 ====================
-
 st.set_page_config(page_title="文獻檢查系統", layout="wide")
 
 # 初始化 session state
 init_session_state()
 
-
 # ==================== 標題區 ====================
-
 st.title("📚 學術文獻引用檢查系統")
 
 st.markdown("""
@@ -60,19 +33,15 @@ st.markdown("""
 
 st.markdown("---")
 
-
 # ==================== 側邊欄：資料管理 ====================
-
 with st.sidebar:
     st.header("💾 資料管理")
     
-    # 顯示當前暫存狀態
     st.subheader("📊 當前暫存狀態")
     st.metric("內文引用數量", len(st.session_state.in_text_citations))
     st.metric("參考文獻數量", len(st.session_state.reference_list))
     st.metric("已驗證文獻", len(st.session_state.verified_references))
     
-    # 清空資料
     st.markdown("---")
     st.subheader("🗑️ 清空資料")
     if st.button("清空所有暫存", type="secondary", use_container_width=True):
@@ -82,694 +51,45 @@ with st.sidebar:
         st.success("已清空所有暫存資料")
         st.rerun()
 
-def display_reference_with_details(ref, index, format_type='IEEE'):
-    """ 統一顯示參考文獻的詳細資訊 """
-    title_text = ref.get('title', '未提供標題')
-    ref_num = ref.get('ref_number', str(index))
-    
-    # 根據來源類型決定圖示
-    lang = ref.get('lang', 'EN')
-    
-    with st.expander(f"[{ref_num}] {title_text}", expanded=False):
-        # 作者
-        authors_data = ref.get('authors')
-        if authors_data:
-            st.markdown(f"**👥 作者**")
-            # IEEE 格式才使用 parsed_authors（名 姓）
-            if format_type == 'IEEE' and ref.get('parsed_authors'):
-                auth_list = [f"{a.get('first', '')} {a.get('last', '')}".strip() for a in ref['parsed_authors']]
-                st.markdown(f"　└─ {', '.join(auth_list)}")
-            elif isinstance(authors_data, list):
-                # APA 格式的作者列表
-                if lang == 'ZH':
-                    author_display = "、".join(authors_data)
-                else:
-                    author_display = ", ".join(authors_data)
-                st.markdown(f"　└─ {author_display}")
-            else:
-                # 字串格式作者
-                st.markdown(f"　└─ {authors_data}")
-        
-        # 標題
-        if ref.get('title'):
-            st.markdown(f"**📝 標題**")
-            st.markdown(f"　└─ {ref['title']}")
-        
-        # 書名（若為書籍章節）
-        if ref.get('book_title'):
-            st.markdown(f"**📚 書名**")
-            st.markdown(f"　└─ {ref['book_title']}")
-
-        # 論文集名稱（若為會議論文）
-        if ref.get('proceedings_title'):
-            st.markdown(f"**📄 論文集名稱**")
-            st.markdown(f"　└─ In {ref['proceedings_title']}")
-        
-        # 編輯
-        if ref.get('editors'):
-            st.markdown(f"**✍️ 編輯**")
-            st.markdown(f"　└─ {ref['editors']}")
-        
-        # 來源（會議、期刊、出版社）
-        # 根據格式顯示不同欄位，但保持相同順序
-        if format_type == 'IEEE':
-            source_show = (ref.get('conference_name') or 
-                        ref.get('journal_name') or 
-                        ref.get('source'))
-        else:  # APA
-            source_show = (ref.get('source') or 
-                        ref.get('publisher'))
-
-        if source_show:
-            if ref.get('conference_name'):
-                label = "會議名稱"
-            elif ref.get('journal_name'):
-                label = "期刊名稱"
-            elif ref.get('source'):
-                label = "期刊名稱" if format_type == 'IEEE' else "期刊名稱"
-            elif ref.get('publisher'):
-                label = "出版社"
-            else:
-                label = "來源出處"
-            st.markdown(f"**📖 {label}**")
-            st.markdown(f"　└─ {source_show}")
-        
-        # 卷期
-        if ref.get('volume') or ref.get('issue'):
-            volume_val = ref.get('volume')
-            issue_val = ref.get('issue')
-            
-            # 只有當值不是 None 時才處理
-            if volume_val and issue_val:
-                # 判斷期號格式
-                issue_str = str(issue_val)
-                
-                # 檢查是否為純數字、數字範圍（1-2、3–4）、或 "1, 2" 格式
-                is_numeric_issue = bool(
-                    issue_str.isdigit() or 
-                    re.match(r'^\d+[\-–—]\d+$', issue_str) or  # 數字範圍
-                    re.match(r'^\d+,\s*\d+$', issue_str)       # 逗號分隔的數字
-                )
-                
-                if is_numeric_issue:
-                    # 純數字或數字範圍：使用 Vol. X, No. Y 格式
-                    vi_display = f"Vol. {volume_val}, No. {issue_str}"
-                else:
-                    # 包含文字（如 Supplement）：使用 Vol. X(Y) 格式
-                    vi_display = f"Vol. {volume_val}({issue_str})"
-            elif volume_val:
-                vi_display = f"Vol. {volume_val}"
-            elif issue_val:
-                vi_display = f"No. {issue_val}"
-            else:
-                vi_display = None
-            
-            if vi_display:
-                st.markdown(f"**📊 卷期**")
-                st.markdown(f"　└─ {vi_display}")
-        
-        # 版次
-        if ref.get('edition'):
-            st.markdown(f"**📖 版次**")
-            st.markdown(f"　└─ {ref['edition']}")
-
-        # 頁碼/文章編號
-        if ref.get('article_number'):
-            st.markdown(f"**📄 文章編號**")
-            st.markdown(f"　└─ {ref['article_number']}")
-        
-        if ref.get('pages'):
-            formatted_pages = format_pages_display(ref['pages'])
-            st.markdown(f"**📄 頁碼**")
-            st.markdown(f"　└─ {formatted_pages}")
-        
-        # 年份與月份
-        if ref.get('year'):
-            date_str = ref['year']
-            if ref.get('month'):
-                date_str = f"{ref['month']} {date_str}"
-            st.markdown(f"**📅 時間**")
-            st.markdown(f"　└─ {date_str}")
-        
-        # 文件類型
-        if ref.get('document_type'):
-            st.markdown(f"**📂 文件類型**")
-            st.markdown(f"　└─ {ref['document_type']}")
-        
-        # 電子資源
-        if ref.get('doi'):
-            st.markdown(f"**🔍 DOI**")
-            st.markdown(f"　└─ [{ref['doi']}](https://doi.org/{ref['doi']})")
-        
-        if ref.get('url'):
-            st.markdown(f"**🌐 URL**")
-            st.markdown(f"　└─ [{ref['url']}]({ref['url']})")
-
-        col_title, col_button = st.columns([3, 1])
-        with col_title:
-            st.markdown("**🛠️ 格式轉換**")
-    
-        with col_button:
-            # 根據格式顯示不同的轉換按鈕
-            if format_type == 'IEEE':
-                button_clicked = st.button("轉 APA", key=f"ref_to_apa_{index}", use_container_width=True)
-            elif format_type == 'APA':
-                if lang == 'EN':
-                    button_clicked = st.button("轉 IEEE", key=f"ref_to_ieee_{index}", use_container_width=True)
-                elif lang == 'ZH':
-                    fmt = ref.get('format', '')
-                    if 'APA' in fmt:
-                        button_clicked = st.button("轉編號", key=f"ref_to_num_{index}", use_container_width=True)
-                    elif 'Numbered' in fmt:
-                        button_clicked = st.button("轉 APA", key=f"ref_to_apa_{index}", use_container_width=True)
-                    else:
-                        button_clicked = False
-                else:
-                    button_clicked = False
-            else:
-                button_clicked = False
-        
-        # 顯示轉換結果
-        if button_clicked:
-            if format_type == 'IEEE':
-                converted_text = convert_en_ieee_to_apa(ref)
-            elif format_type == 'APA':
-                if lang == 'EN':
-                    converted_text = convert_en_apa_to_ieee(ref)
-                elif lang == 'ZH':
-                    fmt = ref.get('format', '')
-                    if 'APA' in fmt:
-                        converted_text = convert_zh_apa_to_num(ref)
-                    elif 'Numbered' in fmt:
-                        converted_text = convert_zh_num_to_apa(ref)
-            
-            st.code(converted_text, language=None)
-        
-        # 原文
-        st.divider()
-        st.caption("📍 原始參考文獻文字")
-        st.markdown(f"""
-            <div style="
-                background-color: #f0f2f6;
-                border-left: 3px solid #1f77b4;
-                padding: 12px 12px 24px 12px;
-                border-radius: 4px;
-                font-family: monospace;
-                font-size: 14px;
-                line-height: 1.6;
-                white-space: pre-wrap;
-                word-wrap: break-word;
-                overflow-wrap: break-word;
-                margin-bottom: 12px;
-            ">
-            {ref['original']}
-            </div>
-            """, unsafe_allow_html=True)
-
 # ==================== 主區域：檔案上傳 ====================
-
 uploaded_file = st.file_uploader("請上傳 Word 或 PDF 檔案", type=["docx", "pdf"])
 
-# 如果有匯入的資料但沒有上傳檔案，顯示匯入的資料
 if not uploaded_file and (st.session_state.in_text_citations or st.session_state.reference_list):
     st.info("📥 顯示已匯入的資料")
 
 elif uploaded_file:
-    # 檢查是否為新檔案（透過檔案名稱和大小判斷）
+    # 檢查是否為新檔案
     current_file_id = f"{uploaded_file.name}_{uploaded_file.size}"
     
     if st.session_state.get('last_file_id') != current_file_id:
-        # 是新檔案，清空所有資料
         st.session_state.in_text_citations = []
         st.session_state.reference_list = []
         st.session_state.missing_refs = []
         st.session_state.unused_refs = []
         st.session_state.comparison_done = False
         st.session_state.last_file_id = current_file_id
-
-    file_ext = uploaded_file.name.split(".")[-1].lower()
     
-    st.subheader(f"📄 處理檔案：{uploaded_file.name}")
+    # 讀取檔案
+    all_paragraphs = handle_file_upload(uploaded_file)
     
-    # ==================== 讀取檔案 ====================
-    
-    with st.spinner("正在讀取檔案..."):
-        if file_ext == "docx":
-            all_paragraphs = extract_paragraphs_from_docx(uploaded_file)
-        elif file_ext == "pdf":
-            all_paragraphs = extract_paragraphs_from_pdf(uploaded_file)
-        else:
-            st.error("不支援的檔案格式")
-            st.stop()
-    
-    st.success(f"✅ 成功讀取 {len(all_paragraphs)} 個段落")
-    st.markdown("---")
-    
-    # ==================== 分離內文與參考文獻 ====================
-    
+    # 分離內文與參考文獻
     content_paras, ref_paras, ref_start_idx, ref_keyword = classify_document_sections(all_paragraphs)
     
+    # 內文引用分析
+    display_citation_analysis(content_paras)
     
-    # ==================== 內文引用分析 ====================
-    
-    st.subheader("🔍 內文引用分析")
-    
-    if content_paras:
-        in_text_citations = extract_in_text_citations(content_paras)
-        
-        # 轉換為可序列化格式並儲存
-        serializable_citations = []
-        for cite in in_text_citations:
-            cite_dict = {
-                'author': cite.get('author'),
-                'co_author': cite.get('co_author'),
-                'year': cite.get('year'),
-                'ref_number': cite.get('ref_number'),
-                'original': cite.get('original'),
-                'normalized': cite.get('normalized'),
-                'position': cite.get('position'),
-                'type': cite.get('type'),
-                'format': cite.get('format')
-            }
-            serializable_citations.append(cite_dict)
-        
-        st.session_state.in_text_citations = serializable_citations
-        
-        # 統計卡片
-        col1, col2, col3 = st.columns([2, 4, 4])
-        
-        with col1:
-            st.markdown(f"""
-            <div style="
-                background: #FAF0E6;
-                border-radius: 30px;
-                padding: 15px;
-                text-align: center;
-                color: #4B2E1E;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-                height: 160px;
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-            ">
-                <div style="font-size: 25px; opacity: 0.9; margin-bottom: 5px;; font-weight: bold;">內文引用總數</div>
-                <div style="font-size: 45px; font-weight: bold;">{len(in_text_citations)}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        apa_count = sum(1 for c in in_text_citations if c['format'] == 'APA')
-        with col2:
-            st.markdown(f"""
-            <div style="
-                background: rgba(242, 231, 203, 0.8);
-                border: 3px solid 	#844200;
-                border-radius: 30px;
-                padding: 15px;
-                text-align: center;
-                color: #761A0A;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-                height: 160px;
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-            ">
-                <div style="font-size: 25px; margin-bottom: 5px;font-weight: bold;">「APA 格式」引用</div>
-                <div style="font-size: 45px; font-weight: bold;">{apa_count}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        ieee_count = sum(1 for c in in_text_citations if c['format'] == 'IEEE')
-        with col3:
-            st.markdown(f"""
-            <div style="
-                background: rgba(242, 231, 203, 0.8);
-                border: 3px solid 	#844200;
-                border-radius: 30px;
-                padding: 15px;
-                text-align: center;
-                color: #761A0A;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-                height: 160px;
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-            ">
-                <div style="font-size: 25px; margin-bottom: 5px;font-weight: bold;">「IEEE 格式」引用</div>
-                <div style="font-size: 45px; font-weight: bold;">{ieee_count}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        # 展開查看所有引用
-        if in_text_citations:
-            with st.expander("📋 查看所有內文引用"):
-                for i, cite in enumerate(in_text_citations, 1):
-                    if cite['format'] == 'APA':
-                        co_author_text = f" & {cite['co_author']}" if cite['co_author'] else ""
-                        st.markdown(
-                            f"{i}. `{cite['original']}` — "
-                            f"**[{cite['format']}]** "
-                            f"作者：**{cite['author']}{co_author_text}** | "
-                            f"年份：**{cite['year']}** | "
-                            f"類型：{cite['type']}"
-                        )
-                    else:
-                        st.markdown(
-                            f"{i}. `{cite['original']}` — "
-                            f"**[{cite['format']}]** "
-                            f"參考編號：**{cite['ref_number']}**"
-                        )
-        else:
-            st.info("未找到任何內文引用")
-    else:
-        st.warning("無內文段落可供分析")
-    
-    st.markdown("---")
-    
-    
-    # ==================== 參考文獻解析 ====================
-    
-    if ref_paras:
-        st.subheader("📖 參考文獻詳細解析與轉換")
-        
-        # 自動偵測格式
-        is_ieee_mode = False
-        sample_count = min(len(ref_paras), 15)
-        for i in range(sample_count):
-            if re.match(r'^\s*[\[【]\s*\d+\s*[】\]]', ref_paras[i].strip()):
-                is_ieee_mode = True
-                break
-        
-        if is_ieee_mode:
-            st.info("💡 偵測到 IEEE 編號格式")
-            #  st.info("💡 偵測到 IEEE 編號格式，啟用**嚴格分割模式**")
-            merged_refs = merge_references_ieee_strict(ref_paras)
-        else:
-            st.info("💡 偵測到 APA 格式")
-            # st.info("💡 偵測到一般格式 (APA/中文)，啟用**智慧混合模式**")
-            merged_refs = merge_references_unified(ref_paras)
-        
-        # 解析參考文獻
-        parsed_refs = [process_single_reference(r) for r in merged_refs]
-        st.session_state.reference_list = parsed_refs
-        
-        st.info(f"成功解析出 {len(parsed_refs)} 筆參考文獻")
-        apa_refs = []
-        ieee_refs = []
-        for r in parsed_refs:
-            if r.get('ref_number'):
-                ieee_refs.append(r)   # 有編號 → 一律算 IEEE
-            else:
-                fmt = str(r.get('format', ''))
-                if fmt.startswith('APA'):
-                    apa_refs.append(r)
-                else:
-                    ieee_refs.append(r)
-
-        apa_refs_count = len(apa_refs)
-        ieee_refs_count = len(ieee_refs)
-        # 統計卡片
-        col1, col2, col3 = st.columns([2, 4, 4])
-        
-        with col1:
-            st.markdown(f"""
-            <div style="
-                background: #FAF0E6;
-                border-radius: 30px;
-                padding: 15px;
-                text-align: center;
-                color: #4B2E1E;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-                height: 160px;
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-            ">
-                <div style="font-size: 25px; opacity: 0.9; margin-bottom: 5px;font-weight: bold;">參考文獻總數</div>
-                <div style="font-size: 45px; font-weight: bold;">{len(parsed_refs)}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        # apa_refs_count = sum(1 for r in parsed_refs if 'APA' in r.get('format', ''))
-        with col2:
-            st.markdown(f"""
-            <div style="
-                background: rgba(242, 231, 203, 0.8);
-                border: 3px solid 	#844200;
-                border-radius: 30px;
-                padding: 15px;
-                text-align: center;
-                color: #761A0A;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-                height: 160px;
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-            ">
-                <div style="font-size: 25px; margin-bottom: 5px;font-weight: bold;">「APA」格式</div>
-                <div style="font-size: 45px; font-weight: bold;">{apa_refs_count}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        # ieee_refs_count = sum(1 for r in parsed_refs if 'IEEE' in r.get('format', ''))
-        with col3:
-            st.markdown(f"""
-            <div style="
-                background: rgba(242, 231, 203, 0.8);
-                border: 3px solid 	#844200;
-                border-radius: 30px;
-                padding: 15px;
-                text-align: center;
-                color: #761A0A;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-                height: 160px;
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-            ">
-                <div style="font-size: 25px; margin-bottom: 5px;font-weight: bold;">「IEEE」格式</div>
-                <div style="font-size: 45px; font-weight: bold;">{ieee_refs_count}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        # with col4:
-        #     st.markdown(f"""
-        #     <div style="
-        #         background: linear-gradient(135deg, #ff7675 0%, #ff9a3d 100%);
-        #         border-radius: 12px;
-        #         padding: 20px;
-        #         text-align: center;
-        #         color: white;
-        #         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        #     ">
-        #         <div style="font-size: 18px; opacity: 0.9; margin-bottom: 6px;">其他/混合</div>
-        #         <div style="font-size: 28px; font-weight: bold;">0</div>
-        #     </div>
-        #     """, unsafe_allow_html=True)
-        
-        # with col5:
-        #     st.markdown(f"""
-        #     <div style="
-        #         background: linear-gradient(135deg, #95de64 0%, #b3e5fc 100%);
-        #         border-radius: 12px;
-        #         padding: 20px;
-        #         text-align: center;
-        #         color: #333;
-        #         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        #     ">
-        #         <div style="font-size: 18px; opacity: 0.9; margin-bottom: 6px;">未知格式</div>
-        #         <div style="font-size: 28px; font-weight: bold;">0</div>
-        #     </div>
-        #     """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        # IEEE 參考文獻展示
-        st.markdown("### 📖 IEEE 格式參考文獻")
-        ieee_list = ieee_refs
-        if ieee_list:
-            for i, ref in enumerate(ieee_list, 1):
-                display_reference_with_details(ref, i, format_type='IEEE')
-        else:
-            st.info("無 IEEE 格式參考文獻")
-
-        st.markdown("---")
-
-        # APA 參考文獻展示
-        st.markdown("### 📚 APA 與其他格式參考文獻")
-        apa_list =  apa_refs
-        if apa_list:
-            for i, ref in enumerate(apa_list, 1):
-                display_reference_with_details(ref, i , format_type='APA') 
-        else:
-            st.info("無 APA 格式參考文獻")
+    # 參考文獻解析
+    display_reference_parsing(ref_paras)
 
 st.markdown("---")
 
-
 # ==================== 交叉比對分析 ====================
-
-st.header("🚀 交叉比對分析")
-st.info("👆 請確認上方解析結果無誤後，點擊下方按鈕開始檢查。")
-
-if st.button("開始交叉比對", type="primary", use_container_width=True):
-    if not st.session_state.in_text_citations or not st.session_state.reference_list:
-        st.error("❌ 資料不足，無法比對。請確認是否已成功解析內文引用與參考文獻。")
-    else:
-        with st.spinner("正在進行雙向交叉比對..."):
-            missing, unused, year_errors = check_references(
-                st.session_state.in_text_citations,
-                st.session_state.reference_list
-            )
-            
-            st.session_state.missing_refs = missing
-            st.session_state.unused_refs = unused
-            st.session_state.year_error_refs = year_errors
-            st.session_state.comparison_done = True
-            
-            st.success("✅ 比對完成！")
-
-# ==================== 顯示比對結果 ====================
+display_comparison_button()
 
 if st.session_state.get('comparison_done', False):
-    st.subheader("📊 比對結果報告")
-    
-    missing_count = len(st.session_state.get('missing_refs', []))
-    unused_refs_all = st.session_state.get('unused_refs', [])
-    pure_unused_count = len([r for r in unused_refs_all if not r.get('year_mismatch')])
-    year_error_count = len(st.session_state.get('year_error_refs', []))
-
-    tab1, tab2, tab3 = st.tabs([
-        f"❌ 遺漏的參考文獻 ({missing_count})", 
-        f"⚠️ 未使用的參考文獻 ({pure_unused_count})",
-        f"📅 疑似年份錯誤 ({year_error_count})"
-    ])
-    # ==================== Tab 1: 遺漏的參考文獻 ====================
-    with tab1:
-        st.caption("💡 說明：這些引用出現在內文中，但在參考文獻列表裡找不到對應項目。")
-
-        missing_refs = st.session_state.get('missing_refs', [])
-        
-        if not missing_refs:
-            st.success("✅ 太棒了！所有內文引用都在參考文獻列表中找到了。")
-        else:
-            for i, item in enumerate(missing_refs, 1):
-                # 只顯示真正遺漏的引用（不包含年份錯誤）
-                st.error(f"{i}. **{item['original']}** (格式: {item['format']})", icon="🚨")
-
-    # ==================== Tab 2: 未使用的參考文獻 ====================
-    with tab2:
-        st.caption("💡 說明：這些文獻列在參考文獻列表中，但在內文中從未被引用過。")
-        
-        unused_refs = st.session_state.get('unused_refs', [])
-        
-        # 只顯示沒有年份錯誤標記的文獻（純粹未使用）
-        pure_unused = [item for item in unused_refs if not (item.get('year_mismatch'))]
-        
-        if not pure_unused:
-            st.success("✅ 太棒了！所有參考文獻都在內文中被有效引用。")
-        else:
-            for i, item in enumerate(pure_unused, 1):
-                st.warning(f"{i}. **{item.get('original', '未知文獻')[:150]}...**")
-    
-    with tab3:
-        st.caption("💡 說明：這些文獻的作者匹配，但年份不一致。")
-        
-        year_error_refs = st.session_state.get('year_error_refs', [])
-        
-        if not year_error_refs:
-            st.success("✅ 沒有發現年份錯誤。")
-        else:
-            # 去重文獻：根據 original 去重
-            seen_originals = set()
-            unique_refs = []
-            for item in year_error_refs:
-                original = item.get('original', '')
-                if original not in seen_originals:
-                    seen_originals.add(original)
-                    unique_refs.append(item)
-            
-            for i, item in enumerate(unique_refs, 1):
-                with st.container():
-                    st.error(f"**{i}. {item.get('original', '未知文獻')[:100]}...**")
-                    
-                    with st.expander("⚠️ 疑似年份引用錯誤", expanded=False):
-                        for mismatch in item.get('year_mismatch', []):
-                            st.write(f"文中引用的是 {mismatch['citation']}")
-                
-    st.markdown("---")
-    
-    # ==================== 匯出功能 ====================
-    st.subheader("📥 匯出比對結果")
-
-    missing_refs = st.session_state.get('missing_refs', [])
-    unused_refs = st.session_state.get('unused_refs', [])  
-
-    # ---- 準備 JSON 資料 ----
-    export_obj = {
-        "missing_references": missing_refs,
-        "unused_references": unused_refs,
-        "year_error_references": year_error_refs
-    }
-    json_bytes = json.dumps(export_obj, ensure_ascii=False, indent=2).encode("utf-8")
-
-    # ---- 準備 CSV 資料 ----
-    def to_df(items, kind):
-        if not items:
-            return pd.DataFrame(columns=["type", "original", "format", "ref_number", "author", "year", "error_detail"])
-        rows = []
-        for x in items:
-            # 處理年份錯誤資訊
-            error_detail = ""
-            if 'year_mismatch' in x and x['year_mismatch']:
-                mismatch_info = []
-                for m in x['year_mismatch']:
-                    mismatch_info.append(f"內文:{m['cited_year']}→正確:{m['correct_year']}")
-                error_detail = "; ".join(mismatch_info)
-            
-            rows.append({
-                "type": kind,
-                "original": x.get("original", ""),
-                "format": x.get("format", ""),
-                "ref_number": x.get("ref_number", ""),
-                "author": x.get("author", ""),
-                "year": x.get("year", ""),
-                "error_detail": error_detail
-            })
-        return pd.DataFrame(rows)
-
-    df_missing = to_df(missing_refs, "missing")
-    df_unused = to_df(unused_refs, "unused")
-    df_year_error = to_df(year_error_refs, "year_error")
-    df_export = pd.concat([df_missing, df_unused], ignore_index=True)
-    csv_bytes = df_export.to_csv(index=False).encode("utf-8")
-
-    # ---- 顯示下載按鈕 ----
-    col_json, col_csv = st.columns(2)
-
-    with col_json:
-        st.download_button(
-            label="⬇️ 下載 JSON(遺漏 / 未使用 / 年份錯誤)",
-            data=json_bytes,
-            file_name=f"citation_check_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-            mime="application/json",
-            use_container_width=True,
-            key="download_json_button"
-        )
-
-    with col_csv:
-        st.download_button(
-            label="⬇️ 下載 CSV(遺漏 / 未使用 / 年份錯誤)",
-            data=csv_bytes,
-            file_name=f"citation_check_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv",
-            use_container_width=True,
-            key="download_csv_button"
-        )
+    display_comparison_results()
 
 # ==================== 查看暫存資料 ====================
-
 if st.session_state.in_text_citations or st.session_state.reference_list:
     with st.expander("🔍 查看完整暫存資料（JSON 格式）"):
         st.json({
