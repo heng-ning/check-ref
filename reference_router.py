@@ -1,9 +1,12 @@
 # reference_router.py
 import re
-from common_utils import normalize_text, has_chinese
-from apa_module import extract_apa_en_detailed, extract_apa_zh_detailed
-from ieee_module import extract_ieee_reference_full
-
+#from common_utils import normalize_text, has_chinese
+#from apa_module import extract_apa_en_detailed, extract_apa_zh_detailed
+#from ieee_module import extract_ieee_reference_full
+from utils.text_processor import normalize_text, has_chinese
+from parsers.apa.apa_parser_en import extract_apa_en_detailed
+from parsers.apa.apa_parser_zh import extract_apa_zh_detailed
+from parsers.ieee.ieee_parser import extract_ieee_reference_full
 def process_single_reference(ref_text: str) -> dict:
     """
     核心分流邏輯：

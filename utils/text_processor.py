@@ -40,7 +40,7 @@ def has_chinese(text):
 def is_valid_year(year_str):
     try:
         year = int(year_str)
-        return 1500 <= year <= 2050
+        return 1900 <= year <= 2026
     except:
         return False
     

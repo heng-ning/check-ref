@@ -23,7 +23,10 @@ def extract_apa_zh_detailed(ref_text):
         result['url'] = raw_url.rstrip('。.')
         ref_text = ref_text[:url_match.start()].strip().rstrip('。. ')
 
-    year_match = re.search(r'[（(]\s*(\d{2,4})\s*[)）]', ref_text)
+   # year_match = re.search(r'[（(]\s*(\d{2,4})\s*[)）]', ref_text)
+    year_match = re.search(r'[（(]\s*(\d{4}[a-z]?|n\.?d\.?)\s*[)）]', ref_text, re.IGNORECASE)
+    if not year_match:
+       year_match = re.search(r'(?<=[\u4e00-\u9fa5])([，,。.]\s*(\d{4})\s*(?:年)?)', ref_text)
     if not year_match: 
         special_match = re.search(r'(.+?)[（(](\d{4})\s*年.+?[)）]', ref_text)
         if special_match:

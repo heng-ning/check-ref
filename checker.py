@@ -14,7 +14,7 @@ def check_references(in_text_citations, reference_list):
         # 1. 轉小寫
         name = str(name).lower()
         # 2. 移除常見綴詞，避免干擾
-        for junk in ['et al.', 'et al', 'and', '&', ',','與', '和', '及']:
+        for junk in ['et al.', 'et al', 'and', '&', ',','與', '和', '及','等人', '等']:
             name = name.replace(junk, ' ')
         # 3. 只取第一個單字 (通常就是姓氏)
         if any('\u4e00' <= char <= '\u9fff' for char in name):

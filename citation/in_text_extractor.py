@@ -27,7 +27,7 @@ def extract_in_text_citations(content_paragraphs):
                 
             for idx, seg in enumerate(segments):
                 seg_match = re.match(
-                    r'([\w\s\u4e00-\u9fff&,、-]+?(?:\s+(?:et\s*al\.?|等))?)\s*[,，]\s*(\d{4}[a-z]?)', 
+                    r'([\w\s\u4e00-\u9fff&,、\-\.]+?(?:\s+(?:et\s*al\.?|等人?|等))?)\s*[,，]\s*(\d{4}[a-z]?)',
                     seg.strip()
                 )
                 if seg_match:
@@ -54,7 +54,7 @@ def extract_in_text_citations(content_paragraphs):
     
     # --- 2. 再處理 APA 單一括號式: (作者, 年份) ---
     pattern_apa1 = re.compile(
-        r'(?<![0-9])[（(]\s*([\w\s\u4e00-\u9fff-]+?)\s*(?:(?:&|and|與|、)\s*([\w\s\u4e00-\u9fff-]+?))?\s*'
+        r'(?<![0-9])[（(]\s*([\w\s\u4e00-\u9fff\-\.]+?)\s*(?:(?:&|and|與|、)\s*([\w\s\u4e00-\u9fff\-\.]+?))?\s*'
         r'(?:,?\s*et\s*al\.?)?\s*[,，]\s*(\d{4}[a-z]?)\s*[）)]',
         re.UNICODE | re.IGNORECASE
     )
@@ -86,7 +86,7 @@ def extract_in_text_citations(content_paragraphs):
 
     # --- APA 敘述式: 作者 (年份) ---
     pattern_apa2 = re.compile(
-        r'(?<![0-9])([\w\u4e00-\u9fff]+(?:\s+(?:et\s*al\.?|等))?)\s*[（(]\s*(\d{4}[a-z]?)\s*[）)]',
+        r'(?<![0-9])([\w\u4e00-\u9fff]+(?:\s+(?:et\s*al\.?|等人?|等))?)\s*[（(]\s*(\d{4}[a-z]?)\s*[）)]',
         re.UNICODE | re.IGNORECASE
     )
     for match in pattern_apa2.finditer(full_text):
@@ -98,7 +98,7 @@ def extract_in_text_citations(content_paragraphs):
             '本研究不僅再次驗證', '這些觀點皆與', '本研究採用', '此點亦與', 
             '而這與', '本研究', '也支持', '而在與', '這顯示',
             '根據', '依據', '參見', '參照', '此與', '亦與', '而這',
-            '顯示', '指出', '發現', '認為', '以及', '至於', '反觀',
+            '顯示', '指出', '發現', '認為', '以及', '至於', '反觀','結合',
             '如', '由', '採', '而', '與', '和', '及', '對', '故', 
             '經', '至', '則', '並', '但', '這'
         ]
