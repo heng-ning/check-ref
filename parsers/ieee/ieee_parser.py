@@ -62,7 +62,10 @@ def extract_ieee_reference_full(ref_text: str) -> dict:
         rest_text = ref_text
 
     # ★ 唯一的「編號 + APA」判斷：用去編號後的 rest_text
-    if find_apa_head(rest_text):
+    looks_like_ieee = bool(re.search(r'\bRFC\s+\d+|\[Online\]|Available:|Retrieved from|https?://|[“”"]', rest_text, re.IGNORECASE))
+    if find_apa_head(rest_text) and not looks_like_ieee:
+    #if find_apa_head(rest_text):
+        
         if has_chinese(rest_text):
             data = extract_apa_zh_detailed(rest_text)
         else:
