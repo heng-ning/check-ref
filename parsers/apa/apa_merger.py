@@ -28,11 +28,20 @@ def merge_references_unified(paragraphs):
         para = normalize_text(para)
         if not para: continue
 
-        # 1. 過濾分類標題
-        category_keywords = r'(Conference|Journal|Article|Preprint|Paper|Book|Theses|Dissertation|Report|Proceedings|Symposium|Web|Online)'
-        if re.match(r'^\d+\.\s*' + category_keywords, para, re.IGNORECASE):
+        #category_keywords = r'(Conference|Journal|Article|Preprint|Paper|Book|Theses|Dissertation|Report|Proceedings|Symposium|Web|Online)'
+        #if re.match(r'^\d+\.\s*' + category_keywords, para, re.IGNORECASE):
+            #if len(para) < 50:
+               # continue
+        if re.match(r'^\d+$', para) or re.match(r'^\[source', para, re.IGNORECASE): continue
+        if re.match(r'^(Table|Figure|Fig\.)', para, re.IGNORECASE): continue
+        category_keywords = r'(中文|英文|一|二|三|四|五|期刊論文|學術研討會論文|網站文章|Conference|Journal|Article|Preprint|Paper|Book|Theses|Dissertation|Report|Proceedings|Symposium|Web|Online)'
+        if re.match(r'^[\d\.\s、，,：:\[\]一二三四五]*' + category_keywords, para, re.IGNORECASE):
             if len(para) < 50:
-                continue
+                if not re.search(r'[（(]\s*\d{4}', para): 
+                    if not re.search(r'(Journal of|Proceedings of)', para, re.IGNORECASE):
+                        continue
+        if re.match(r'^\d+\.\s*[A-Za-z\s/&]+$', para) and len(para) < 60:
+                continue 
 
         # 2. 判斷是否為新文獻開始 (Priority High)
         is_new_start = False
@@ -61,8 +70,8 @@ def merge_references_unified(paragraphs):
             elif re.search(r'^\d+\.\s*(https?://|doi:)', para, re.IGNORECASE):
                 is_new_start = False
             # 防呆條件 3: 純粹只有數字+句號（如 "162."），可能是頁碼
-            elif re.match(r'^\d{1,3}\.\s*$', para):
-                is_new_start = False
+            #elif re.match(r'^\d{1,3}\.\s*$', para):
+             #   is_new_start = False
             else:
                 is_new_start = True
         
@@ -85,20 +94,30 @@ def merge_references_unified(paragraphs):
             # D. 大數字開頭的行 (如 104979.) 也視為延續
             elif re.match(r'^\d{4,}\.', para):
                 is_continuation = True
-
+        if is_new_start and current_ref:
+            # 如果暫存區只有 "數字." (例如 "1.")，代表上一行是被斷開的編號
+            if re.match(r'^\d+\.\s*$', current_ref):
+                is_new_start = False   # 取消新文獻判定
+                is_continuation = True # 強制視為延續
+        # 4. 執行動作
         # 4. 執行動作
         if is_new_start:
             if current_ref: merged.append(current_ref)
+            # 【修正 1】針對 "6. Putra"：放寬移除條件
+            # 只要是 "1~3位數字 + 點" 開頭 (例如 1. 或 999.)，後面不管接什麼，都把編號跟空白去掉
+            if re.match(r'^\d{1,3}\.\s*', para):
+                para = re.sub(r'^\d{1,3}\.\s*', '', para) # 【修正 2】針對 "Waqar,A."：補上逗號後的空白，# 如果發現 "小寫字母,大寫字母" (例如 r,A)，中間補一個空白變成 "r, A"， # 這樣後續的作者判斷程式就能讀懂了
+            para = re.sub(r'([a-z]),([A-Z])', r'\1, \2', para)
             current_ref = para
         elif is_continuation:
-            if current_ref:
+            if current_ref:# 處理中文與英文的連接空白
                 if has_chinese(current_ref[-1:]) and has_chinese(para[:1]):
                     current_ref += para
                 else:
                     current_ref += " " + para
             else:
                 current_ref = para
-        else:
+        else: # 既不是新開始，也不是明顯的延續 (預設合併)
             if current_ref:
                 if has_chinese(current_ref[-1:]) and has_chinese(para[:1]):
                     current_ref += para
