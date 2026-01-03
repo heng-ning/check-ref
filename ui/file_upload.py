@@ -63,6 +63,7 @@ def display_citation_analysis(content_paras):
             'co_author': cite.get('co_author'),
             'year': cite.get('year'),
             'ref_number': cite.get('ref_number'),
+            'all_numbers': cite.get('all_numbers'),
             'original': cite.get('original'),
             'normalized': cite.get('normalized'),
             'position': cite.get('position'),

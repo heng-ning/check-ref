@@ -135,17 +135,52 @@ def extract_in_text_citations(content_paragraphs):
                 citation_ids.add(citation_id)
     
     # --- IEEE 數字式: [n] ---
-    pattern_ieee = re.compile(r'[【\[]\s*(\d+)\s*[】\]]', re.UNICODE)
-    for match in pattern_ieee.finditer(full_text):
-        ref_number = match.group(1)
+    pattern_ieee_robust = re.compile(
+        r'[【\[]\s*(\d+(?:[–\-\—,;\s]+\d+)*)\s*[】\]]', 
+        re.UNICODE
+    )
+
+    for match in pattern_ieee_robust.finditer(full_text):
+        content_str = match.group(1) # 括號內的內容，例如 "1, 3-5"
+        
+        # 解析出所有包含的編號
+        # 1. 先用逗號或分號切分
+        raw_parts = re.split(r'[,;]', content_str)
+        extracted_numbers = []
+        
+        for part in raw_parts:
+            part = part.strip()
+            # 2. 處理連字號 (範圍)
+            range_match = re.match(r'(\d+)\s*[–\-\—]\s*(\d+)', part)
+            if range_match:
+                start_n = int(range_match.group(1))
+                end_n = int(range_match.group(2))
+                # 限制範圍大小防止誤判 (例如 [2020-2021] 可能不是引用)
+                if start_n < end_n and (end_n - start_n) < 100:
+                    for k in range(start_n, end_n + 1):
+                        extracted_numbers.append(str(k))
+            elif part.isdigit():
+                extracted_numbers.append(part)
+        
+        # 如果解析不出任何數字，跳過
+        if not extracted_numbers: continue
+
+        # 為每一個解析出的數字建立引用記錄
+        # 這裡有兩種策略：
+        # A. 把整個 [1-3] 當作一個引用 (type='IEEE-range')
+        # B. 拆成 [1], [2], [3] 三個獨立引用 (方便後續比對)
+        # 這裡採用策略 A (保留原始樣貌)，但在 normalized 欄位保留所有數字以供比對
+        
         citation_id = f"{match.start()}-{match.end()}"
         if citation_id not in citation_ids:
             normalized = normalize_citation_for_matching(match.group(0))
+            
             citations.append({
                 'author': None,
                 'co_author': None,
                 'year': None,
-                'ref_number': ref_number,
+                'ref_number': extracted_numbers[0], # 代表號 (第一個)
+                'all_numbers': extracted_numbers,   # [新欄位] 包含所有解析出的編號
                 'original': match.group(0),
                 'normalized': normalized,
                 'position': match.start(),

@@ -12,7 +12,7 @@ from ui.comparison_ui import (
     display_comparison_button,
     display_comparison_results
 )
-
+from citation.in_text_extractor import extract_in_text_citations 
 # ==================== 頁面設定 ====================
 st.set_page_config(page_title="文獻檢查系統", layout="wide")
 
