@@ -146,7 +146,10 @@ def extract_in_text_citations(content_paragraphs):
         
         start_n = int(re.search(r'\d+', start_bracket).group(0))
         end_n = int(re.search(r'\d+', end_bracket).group(0))
-        
+        # === [新增] 排除起點或終點為 0 的情況 ===
+        if start_n == 0 or end_n == 0:
+            continue
+
         extracted_numbers = []
         
         # 限制範圍大小 (防止誤判，例如 [2020]-[2021] 年份)
@@ -188,6 +191,10 @@ def extract_in_text_citations(content_paragraphs):
 
     for match in pattern_ieee_robust.finditer(full_text):
         content_str = match.group(1)
+        if re.match(r'^0\b', content_str):  # 開頭就是 0
+            continue
+        if re.search(r'[,;]\s*0\b', content_str):  # 中間有逗號+0（例如 "3, 0" 或 "1,0"）
+            continue
         raw_parts = re.split(r'\s*[,;]\s*', content_str)
         temp_numbers = [] # 先暫存，等等要過濾
         
@@ -198,6 +205,9 @@ def extract_in_text_citations(content_paragraphs):
             if range_match:
                 start_n = int(range_match.group(1))
                 end_n = int(range_match.group(2))
+                # === [新增] 排除範圍含 0 的 (例如 [0-5]) ===
+                if start_n == 0 or end_n == 0:
+                    continue
                 if start_n < end_n and (end_n - start_n) < 100:
                     for k in range(start_n, end_n + 1):
                         temp_numbers.append(str(k))
