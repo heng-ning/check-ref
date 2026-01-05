@@ -95,7 +95,7 @@ def extract_in_text_citations(content_paragraphs):
         
         # ========== [修正邏輯] 移除雜訊前綴 ==========
         junk_prefixes = [
-            '本研究不僅再次驗證', '這些觀點皆與', '本研究採用', '此點亦與', 
+            '本研究不僅再次驗證', '這些觀點皆與', '本研究採用', '此點亦與','等人則表示', 
             '而這與', '本研究', '也支持', '而在與', '這顯示',
             '根據', '依據', '參見', '參照', '此與', '亦與', '而這',
             '顯示', '指出', '發現', '認為', '以及', '至於', '反觀','結合',
@@ -135,42 +135,35 @@ def extract_in_text_citations(content_paragraphs):
                 citation_ids.add(citation_id)
     
     # --- IEEE 數字式: [n] ---
-    pattern_ieee_robust = re.compile(
-        r'[【\[]\s*(\d+(?:[–\-\—,;\s]+\d+)*)\s*[】\]]', 
+    pattern_ieee_range_brackets = re.compile(
+        r'([【\[]\s*\d+\s*[】\]])\s*[–\-\—~～]\s*([【\[]\s*\d+\s*[】\]])',
         re.UNICODE
     )
-
-    for match in pattern_ieee_robust.finditer(full_text):
-        content_str = match.group(1) # 括號內的內容，例如 "1, 3-5"
+    for match in pattern_ieee_range_brackets.finditer(full_text):
+        # 提取起點與終點，例如從 "[13]" 提取 13，從 "[16]" 提取 16
+        start_bracket = match.group(1)
+        end_bracket = match.group(2)
         
-        # 解析出所有包含的編號
-        # 1. 先用逗號或分號切分
-        raw_parts = re.split(r'[,;]', content_str)
+        start_n = int(re.search(r'\d+', start_bracket).group(0))
+        end_n = int(re.search(r'\d+', end_bracket).group(0))
+        
         extracted_numbers = []
         
-        for part in raw_parts:
-            part = part.strip()
-            # 2. 處理連字號 (範圍)
-            range_match = re.match(r'(\d+)\s*[–\-\—]\s*(\d+)', part)
-            if range_match:
-                start_n = int(range_match.group(1))
-                end_n = int(range_match.group(2))
-                # 限制範圍大小防止誤判 (例如 [2020-2021] 可能不是引用)
-                if start_n < end_n and (end_n - start_n) < 100:
-                    for k in range(start_n, end_n + 1):
-                        extracted_numbers.append(str(k))
-            elif part.isdigit():
-                extracted_numbers.append(part)
+        # 限制範圍大小 (防止誤判，例如 [2020]-[2021] 年份)
+        if start_n < end_n and (end_n - start_n) < 100:
+            for k in range(start_n, end_n + 1):
+                extracted_numbers.append(str(k))
         
-        # 如果解析不出任何數字，跳過
-        if not extracted_numbers: continue
+        # 過濾雜訊 (沿用您原本的過濾邏輯)
+        final_numbers = []
+        for num in extracted_numbers:
+            val = int(num)
+            if val == 0: continue
+            if val > 2000: continue
+            final_numbers.append(str(val))
+            
+        if not final_numbers: continue
 
-        # 為每一個解析出的數字建立引用記錄
-        # 這裡有兩種策略：
-        # A. 把整個 [1-3] 當作一個引用 (type='IEEE-range')
-        # B. 拆成 [1], [2], [3] 三個獨立引用 (方便後續比對)
-        # 這裡採用策略 A (保留原始樣貌)，但在 normalized 欄位保留所有數字以供比對
-        
         citation_id = f"{match.start()}-{match.end()}"
         if citation_id not in citation_ids:
             normalized = normalize_citation_for_matching(match.group(0))
@@ -179,8 +172,74 @@ def extract_in_text_citations(content_paragraphs):
                 'author': None,
                 'co_author': None,
                 'year': None,
-                'ref_number': extracted_numbers[0], # 代表號 (第一個)
-                'all_numbers': extracted_numbers,   # [新欄位] 包含所有解析出的編號
+                'ref_number': final_numbers[0], 
+                'all_numbers': final_numbers,
+                'original': match.group(0),
+                'normalized': normalized,
+                'position': match.start(),
+                'type': 'IEEE-numeric-range', # 標記為特殊範圍格式
+                'format': 'IEEE'
+            })
+            citation_ids.add(citation_id)
+    pattern_ieee_robust = re.compile(
+        r'[【\[]\s*(\d+(?:[–\-\—~～,;\s]+\d+)*)\s*[】\]]', 
+        re.UNICODE
+    )
+
+    for match in pattern_ieee_robust.finditer(full_text):
+        content_str = match.group(1)
+        raw_parts = re.split(r'\s*[,;]\s*', content_str)
+        temp_numbers = [] # 先暫存，等等要過濾
+        
+        for part in raw_parts:
+            part = part.strip()
+            # 處理範圍
+            range_match = re.match(r'(\d+)\s*[–\-\—~～]\s*(\d+)', part)
+            if range_match:
+                start_n = int(range_match.group(1))
+                end_n = int(range_match.group(2))
+                if start_n < end_n and (end_n - start_n) < 100:
+                    for k in range(start_n, end_n + 1):
+                        temp_numbers.append(str(k))
+            elif part.isdigit():
+                temp_numbers.append(part)
+        
+        # === [新增] 過濾雜訊 ===
+        extracted_numbers = []
+        for num in temp_numbers:
+            # 規則 1: 排除 '0' (通常參考文獻從 1 開始)
+            # 規則 2: 排除 '0' 開頭且長度 > 1 的 (如 '01', '001') -> 視情況，若您認為 '01' 算 '1' 則可用 int(num) 轉
+            # 規則 3: 排除過長的數字 (如 '2023' 可能是年份，'00001' 可能是編號)
+            # 這裡假設合理的參考文獻編號通常在 1~999 之間，或長度不超過 3 位數
+            
+            # 先轉成整數判斷數值
+            val = int(num)
+            
+            # 條件 A: 數值必須 > 0
+            if val == 0: continue
+            
+            # 條件 B: 排除像 [2024] 這種年份被誤判為引用的情況
+            # 假設參考文獻不超過 2000 筆 (您可以根據需求放寬到 5000)
+            if val > 2000: continue
+            
+            # 條件 C: 排除 '00001' 這種像流水號的格式 (雖然數值是 1)
+            # 如果您想嚴格禁止 '01' 這種寫法，就檢查字串長度與數值是否匹配
+            if num.startswith('0') and len(num) > 1: continue 
+            
+            extracted_numbers.append(str(val)) # 轉回標準字串 '1' (去掉 01 的 0)
+
+        if not extracted_numbers: continue
+
+        citation_id = f"{match.start()}-{match.end()}"
+        if citation_id not in citation_ids:
+            normalized = normalize_citation_for_matching(match.group(0))
+            
+            citations.append({
+                'author': None,
+                'co_author': None,
+                'year': None,
+                'ref_number': extracted_numbers[0], 
+                'all_numbers': extracted_numbers,
                 'original': match.group(0),
                 'normalized': normalized,
                 'position': match.start(),
