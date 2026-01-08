@@ -273,8 +273,16 @@ def render_citation_list(citations):
                     f"類型：{cite['type']}"
                 )
             else:
+                ref_display = cite.get('ref_number', '?')
+                
+                # 如果有 all_numbers 且數量大於 1，顯示完整列表
+                if cite.get('all_numbers') and len(cite['all_numbers']) > 1:
+                    # 將列表轉為字串，如 "6, 7, 8"
+                    all_nums_str = ", ".join(cite['all_numbers'])
+                    ref_display = f"{all_nums_str}"
+                
                 st.markdown(
                     f"{i}. `{cite['original']}` — "
                     f"**[{cite['format']}]** "
-                    f"參考編號：**{cite['ref_number']}**"
+                    f"參考編號：**{ref_display}**"
                 )

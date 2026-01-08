@@ -128,11 +128,16 @@ def extract_ieee_reference_full(ref_text: str) -> dict:
         # B. 提取 URL (含 Markdown 格式支援)
         md_link_match = re.search(r'\[([^\]]+)\]\((https?://[^\)]+)\)', rest_text)
         if md_link_match:
-            result['url'] = md_link_match.group(2)
-            rest_text = rest_text.replace(md_link_match.group(0), "") # 移除連結避免干擾
+            raw_url = md_link_match.group(2)
+            # [修正] 移除 URL 末尾的點或逗號，但保留路徑中的斜線
+            result['url'] = raw_url.rstrip('.,;，。')
+            rest_text = rest_text.replace(md_link_match.group(0), "") 
         else:
-            url_match = re.search(r'(https?://[^\s,，。]+)', rest_text)
-            if url_match: result['url'] = url_match.group(1).rstrip('.')
+            url_match = re.search(r'(https?://[^\s]+)', rest_text)
+            if url_match: 
+                # 移除 URL 末尾常見的標點符號，但小心不要移除路徑中的斜線
+                raw_url = url_match.group(1)
+                result['url'] = raw_url.rstrip('.,;，。)]}').strip()
             
             doi_match = re.search(r'doi:?\s*(10\.\d{4,}/[^\s,，。]+)', rest_text, re.IGNORECASE)
             if doi_match: result['doi'] = doi_match.group(1).rstrip('.')
@@ -419,6 +424,13 @@ def extract_ieee_reference_full(ref_text: str) -> dict:
         if not result['year']:
             temp_text = re.sub(r'doi:.*', '', after_title, flags=re.IGNORECASE)
             temp_text = re.sub(r'©\s*\d{4}', '', temp_text)
+            
+            # [New] 先把頁碼範圍 (如 2023-2027) 模糊化，避免誤判為年份
+            # 尋找 "數字-數字" 格式，且數字看起來像年份的
+            temp_text = re.sub(r'\b(19|20)\d{2}\s*[-–]\s*(19|20)\d{2}\b', 'PAGE_RANGE', temp_text)
+            # 也要處理 "pp. 2023-2027" 這種格式
+            temp_text = re.sub(r'(?:pp\.?|Pages?|頁)\s*\d+(?:[-–]\d+)?', 'PAGE_INFO', temp_text, flags=re.IGNORECASE)
+
             year_matches = re.findall(r'(?<!:)(?<!arXiv:)\b(19\d{2}|20\d{2})\b(?!\.\d)', temp_text)
             if year_matches: 
                 result['year'] = year_matches[-1]
@@ -449,11 +461,75 @@ def extract_ieee_reference_full(ref_text: str) -> dict:
                     after_title = potential_rest
 
         # === 3. 提取來源資訊 (原始邏輯) ===
-        full_search_text = after_title 
-        
+        full_search_text = after_title
+        pub_year_match = re.search(r'\b(IEEE|ACM|Springer|Wiley|Elsevier)\s*,\s*(\d{4})', full_search_text, re.IGNORECASE)
+        if pub_year_match:
+            publisher_candidate = pub_year_match.group(1)
+            year_candidate = pub_year_match.group(2)
+            
+            # 如果抓到的年份跟主要年份一樣 (或主要年份還沒抓到)
+            if not result['year'] or year_candidate == result['year']:
+                result['publisher'] = publisher_candidate
+                if not result['year']: result['year'] = year_candidate
+                
+                # 將這段 (IEEE, 2017) 從 full_search_text 中移除，避免干擾後續 Source 解析
+                # 使用 replace 並處理可能殘留的標點
+                full_search_text = full_search_text.replace(pub_year_match.group(0), "")
+                full_search_text = full_search_text.strip().rstrip(',. ')
         # 1. Page Match
         pp_match = re.search(r'\b(?:pp?\.?|Pages?|Page\s*No\.?|頁)\s*(\d+(?:\s*(?:[\–\-—]|to)\s*\d+)?)', full_search_text, re.IGNORECASE)
+        if not pp_match:
+            # 尋找 "數字-數字" 結尾
+            noprefix_pp_match = re.search(r'(?:,|^)\s*(\d{1,5}\s*[-–]\s*\d{1,5})\.?\s*$', full_search_text)
+            if noprefix_pp_match:
+                pp_match = noprefix_pp_match
+                
+        arxiv_match = re.search(r'arXiv\s*(?:preprint)?\s*(?:arXiv)?[:\s]*([\d\.]+)', full_search_text, re.IGNORECASE)
         
+        if arxiv_match:
+            arxiv_id = arxiv_match.group(1)
+            result['source_type'] = 'Preprint/arXiv'
+            # 將 arXiv 編號存入 url 或 report_number (視您的資料庫設計而定)
+            # 建議轉為標準 URL
+            result['url'] = f"https://arxiv.org/abs/{arxiv_id}"
+            
+            # 將 arXiv 字串從 source 中移除，避免被當成期刊名
+            # 這裡使用替換法
+            full_search_text = full_search_text.replace(arxiv_match.group(0), "").strip().strip(',. ')
+            
+            # 如果剩餘文字包含 "arXiv preprint"，也清理掉
+            full_search_text = re.sub(r'arXiv\s*preprint', '', full_search_text, flags=re.IGNORECASE).strip().strip(',. ')
+            
+            # 設定 Source 為 "arXiv" (可選)
+            if not result['source']:
+                result['source'] = "arXiv"
+        
+        ssrn_match = re.search(r'SSRN\s+(\d+)', full_search_text, re.IGNORECASE)
+        
+        if ssrn_match:
+            ssrn_id = ssrn_match.group(1)
+            result['source_type'] = 'Working Paper/Preprint'
+            result['report_number'] = f"SSRN {ssrn_id}"
+            
+            # 生成標準 SSRN URL
+            result['url'] = f"https://papers.ssrn.com/sol3/papers.cfm?abstract_id={ssrn_id}"
+            
+            # 將 SSRN 相關字串從 source 中移除，避免被當成期刊名
+            # 移除 "Available at SSRN 4658103" 或 "SSRN 4658103"
+            full_search_text = re.sub(r'(?:Available\s+at\s+)?SSRN\s+' + ssrn_id, '', full_search_text, flags=re.IGNORECASE).strip().strip(',. ')
+            
+            # 如果 Source 只剩下空字串或雜訊，就將其清空，避免顯示 "at"
+            if not full_search_text or re.match(r'^(at|in)\b', full_search_text, re.IGNORECASE):
+                result['source'] = None
+            else:
+                result['source'] = full_search_text
+
+        # 處理另一種 SSRN 寫法: "SSRN Electronic Journal"
+        elif re.search(r'SSRN\s+Electronic\s+Journal', full_search_text, re.IGNORECASE):
+            result['source_type'] = 'Journal Article'
+            result['journal_name'] = "SSRN Electronic Journal"
+            result['source'] = "SSRN Electronic Journal"
+
         if pp_match: 
             raw_pages = pp_match.group(1)
             result['pages'] = re.sub(r'\s+', '', raw_pages).replace('to', '-').replace('–', '-').replace('—', '-')
@@ -486,7 +562,8 @@ def extract_ieee_reference_full(ref_text: str) -> dict:
             r'\b(?:no\.?|期|第\s*\d+\s*期)\s*\d+', 
             r'\b(?:pp?\.?|Pages?|Page|頁)\s*\d+', 
             r'(?<!:)\b19\d{2}\b', 
-            r'(?<!:)\b20\d{2}\b', 
+            r'(?<!:)\b20\d{2}\b',
+            r'(?:,|^)\s*\d{1,4}\s*[-–]\s*\d{1,4}\.?\s*$', 
             r'doi:', 
             months_regex
         ]
@@ -495,6 +572,16 @@ def extract_ieee_reference_full(ref_text: str) -> dict:
         for ind in end_indicators:
             matches = list(re.finditer(ind, full_search_text, re.IGNORECASE))
             for m in matches:
+                if (r'19\d{2}' in ind or r'20\d{2}' in ind):
+                    # 抓取前面的 context
+                    pre_text = full_search_text[:m.start()].strip()
+                    post_text = full_search_text[m.end():].strip()
+                    if pre_text.endswith('(') and post_text.startswith(')'):
+                        continue
+                    
+                    # 另一種情況：FG 2017 (沒有括號，但前面是字母且無逗號)
+                    if re.search(r'[a-zA-Z]\s*$', pre_text) and not pre_text.endswith(','):
+                        continue
                 if (r'19\d{2}' in ind or r'20\d{2}' in ind):
                     context_after = full_search_text[m.end():]
                     if re.search(r'(卷|期|頁)', full_search_text[m.end():m.end()+5]): 
@@ -527,8 +614,30 @@ def extract_ieee_reference_full(ref_text: str) -> dict:
         clean_source = clean_source_text(source_candidate)
         if clean_source and not re.match(r'^(http|www)', clean_source, re.IGNORECASE):
             result['source'] = clean_source
-
+        
         # Source Type
+        if 'CoRR' in full_search_text or 'abs/' in full_search_text:
+            result['source_type'] = 'Preprint/arXiv'
+            
+            # 嘗試抓取 abs/xxxx
+            abs_match = re.search(r'abs/(\d{4}\.\d+)', full_search_text)
+            if not abs_match:
+                abs_match = re.search(r'abs/(\d+\.\d+)', full_search_text)
+
+            if abs_match:
+                arxiv_id = abs_match.group(1)
+                
+                # [修正] 即使原本有 URL，如果它是錯的 (例如結尾是 .)，我們也要覆蓋它
+                current_url = result.get('url', '')
+                if not current_url or current_url.endswith('.') or 'abs/.' in current_url:
+                    result['url'] = f"https://arxiv.org/abs/{arxiv_id}"
+                
+                # 清理 source
+                result['source'] = "CoRR" 
+                
+                # 重要：如果 Volume 被誤填為 abs/...，要清空
+                if result.get('volume') and 'abs/' in str(result['volume']):
+                    result['volume'] = None
         if re.search(r'(Proc\.|Proceedings|Conference|Symposium|Workshop)', full_search_text, re.IGNORECASE):
             result['source_type'] = 'Conference Paper'
             result['conference_name'] = clean_source
@@ -586,13 +695,33 @@ def extract_ieee_reference_full(ref_text: str) -> dict:
         
         # URL (如果之前在前面沒抓到，這裡做最後確認，但不覆蓋已抓到的完整 URL)
         if not result['url']:
+            url_match = re.search(r'(https?://[^\s,;]+)', full_search_text, re.IGNORECASE)
+            if url_match:
+                # 檢查抓到的 URL 是否以點號結束，且後面還有 "com", "org" 等頂級域名
+                raw_url = url_match.group(1)
+                end_pos = url_match.end()
+
+                # 偷看後面的文字，看是否有斷開的域名部分
+                # 例如 raw_url="https://mathworld.", 後面是 " wolfram. com/"
+                remaining = full_search_text[end_pos:]
+            
+                # 尋找斷裂的域名模式： (空格 + 單字 + 點/斜線)
+                broken_domain_match = re.match(r'^((?:\s+[a-z0-9]+[\./])+(?:com|org|net|edu|gov)\b[^\s]*)', remaining, re.IGNORECASE)
+
+                if broken_domain_match:
+                    # 拼起來，並移除空格
+                    full_broken_url = raw_url + broken_domain_match.group(1)
+                    result['url'] = full_broken_url.replace(' ', '').replace('\n', '')
+                else:
+                    result['url'] = raw_url.rstrip('.,;)]')
             pdf_url_match = re.search(r'(?:Available:|Retrieved from|URL)\s*(https?://.*?\.pdf)', full_search_text, re.IGNORECASE)
             if pdf_url_match:
-                result['url'] = pdf_url_match.group(1).replace(' ', '').strip()
+                result['url'] = pdf_url_match.group(1).strip()
             else:
                 url_match = re.search(r'(?:Available:|Retrieved from|URL)\s*(https?://[^,\n\s\]\)]+)', full_search_text, re.IGNORECASE)
                 if url_match:
-                    result['url'] = url_match.group(1).strip()
+                    # result['url'] = url_match.group(1).strip()
+                    result['url'] = url_match.group(1).strip().rstrip('.,;)]')
                 elif not result['url']:
                     gen_url = re.search(r'(https?://[^\s,;]+(?:\.pdf)?)', full_search_text, re.IGNORECASE)
                     if gen_url: result['url'] = gen_url.group(1).strip()
@@ -637,7 +766,6 @@ def extract_ieee_reference_full(ref_text: str) -> dict:
                 p = r'(?:,\s*|\s+)' + re.escape(str(result['year'])) + r'\s*$'
                 idx = get_match_index(p)
                 if idx is not None and idx > 10: cut_indices.append(idx)
-
             # 5. 檢查殘留月份 (e.g. ", Sept")
             month_end_match = re.search(r'(?:,\s*|\s+)(' + months_regex + r')[\.\s]*$', src, re.IGNORECASE)
             if month_end_match:
@@ -648,7 +776,30 @@ def extract_ieee_reference_full(ref_text: str) -> dict:
                 min_idx = min(cut_indices)
                 src = src[:min_idx].strip().rstrip(',. -')
                 result['source'] = src
+            date_range_match = re.search(r'(?:,\s*|\s+)\d{1,2}(?:[-–]\d{1,2})?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s*,?\s*\d{4}\s*$', src, re.IGNORECASE)
+            
+            if date_range_match:
+                # 記錄這段日期，補回 result['month']
+                raw_date = date_range_match.group(0).strip(',. ')
+                if not result.get('month'):
+                    month_in_date = re.search(r'[a-zA-Z]+', raw_date)
+                    if month_in_date: result['month'] = month_in_date.group(0)
 
+                # 執行切除
+                src = src[:date_range_match.start()].strip().rstrip(',. -')
+
+            # 2. 嘗試移除單純的「月份+年份」 (如 Oct. 2022)
+            # 必須在字串尾端，且前面有逗號分隔
+            elif re.search(r',\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s*,?\s*\d{4}\s*$', src, re.IGNORECASE):
+                month_year_match = re.search(r',\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s*,?\s*\d{4})\s*$', src, re.IGNORECASE)
+                if month_year_match:
+                    src = src[:month_year_match.start()].strip().rstrip(',. -')
+
+            result['source'] = src
+            
+            # 同步更新 conference_name
+            if result.get('source_type') == 'Conference Paper':
+                result['conference_name'] = src
         # 比對 Source 與 Title
         if result.get('source') and result.get('title'):
             t_clean = re.sub(r'[\W_]+', '', result['title'].lower())
@@ -658,6 +809,43 @@ def extract_ieee_reference_full(ref_text: str) -> dict:
             elif s_clean in t_clean: result['source'] = None
 
         if result.get('source'):
+            # [優先檢查] 檢測並修復斷裂的 URL (wolfram. com)
+            # 這是為了處理像 "mathworld. wolfram. com/" 這樣的案例
+            if re.search(r'\b(?:com|org|net|edu|gov)\b', result['source'], re.IGNORECASE):
+                # 嘗試移除所有空格
+                temp_url = result['source'].replace(' ', '').replace('\n', '')
+                # 檢查修復後是否像一個 URL (包含 .com/.org 等，且長度合理)
+                if re.search(r'[\w\-\.]+\.(?:com|org|net|edu|gov)', temp_url, re.IGNORECASE):
+                    # 如果原本沒有 URL，或者原本的 URL 殘缺不全，就採用這個
+                    if not result.get('url') or len(result['url']) < 10:
+                        if not temp_url.startswith('http'):
+                            temp_url = "http://" + temp_url
+                        result['url'] = temp_url
+                        result['source'] = None # 清空 source，因為它其實是 URL
+            
+            # [修正] 只有當 Source 還存在時，才繼續執行後續的 URL 檢查
+            if result.get('source'):
+                looks_like_url = re.search(r'\.\s*(?:com|org|net|edu|gov|io)\b', result['source'], re.IGNORECASE)
+                has_http = re.search(r'https?://', result['source'], re.IGNORECASE)
+                has_www = re.search(r'www\.', result['source'], re.IGNORECASE)
+                
+                if looks_like_url or has_http or has_www:
+                    # 只有當 result['url'] 還沒有值的時候，才把這個疑似網址的東西搬過去
+                    # (但您的案例中已經有 https://mathworld... 了，所以這裡應該直接清空 Source)
+                    if not result.get('url'):
+                        # 嘗試修復空格 (如 "wolfram. com" -> "wolfram.com")
+                        fixed_url = result['source'].replace('. ', '.')
+                        if not fixed_url.startswith('http'):
+                            fixed_url = "http://" + fixed_url
+                        result['url'] = fixed_url
+                    
+                    # 清空誤判的 Source
+                    result['source'] = None
+                    
+                    # 如果誤判為 Journal，也要清空
+                    if result.get('journal_name') == result.get('source'):
+                        result['journal_name'] = None
+
         # 重新檢查 full_search_text 來判斷類型
             if re.search(r'(Proc\.|Proceedings|Conference|Symposium|Workshop)', full_search_text, re.IGNORECASE):
                 result['source_type'] = 'Conference Paper'
@@ -681,8 +869,13 @@ def extract_ieee_reference_full(ref_text: str) -> dict:
 def clean_source_text(text):
     if not text: return None
     
-    # 1. 清理開頭的連接詞與標記 (in, 收錄於, J., [J] 等)
     text = re.sub(r'^in(?:[:\s]+|$)', '', text, flags=re.IGNORECASE)
+    # [New] 移除 "presented at (the)"
+    text = re.sub(r'^(?:presented|submitted)\s+at\s+(?:the\s+)?', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'^(?:presented|submitted)\s+to\s+(?:the\s+)?', '', text, flags=re.IGNORECASE)
+    # [New] 移除 "Proceedings of (the)" (通常 Proc. 前面會有 in，但有時會連著 presented at)
+    text = re.sub(r'^Pro[-\s]?ceedings\s+of\s+(?:the\s+)?', '', text, flags=re.IGNORECASE)
+    # 1. 清理開頭的連接詞與標記 (in, 收錄於, J., [J] 等)
     text = re.sub(r'^(?:收錄於|載於|刊於)[:\s]*', '', text)
     text = re.sub(r'^J\.\s+', '', text)
     text = re.sub(r'\[[JCD]\]', '', text) # 移除 [J], [C], [D] 等分類標記
@@ -693,13 +886,12 @@ def clean_source_text(text):
     # 3. 移除存取日期 (accessed ...)
     text = re.sub(r'\(?\s*accessed\.?.*', '', text, flags=re.IGNORECASE)
     # 4. 移除網址殘留 (https://...)
-    text = re.sub(r'https?://[^\s]+', '', text)
+    text = re.sub(r'[,\s\-;，。、\.]+$', '', text) 
     # 5. 最終修剪標點與空白
     text = text.strip()
 
     # 3. 只清理結尾的「逗號、空格、破折號」，但保留句點（期刊縮寫需要）
-    text = re.sub(r'[,\s\-;，]+$', '', text)
-    
+    text = re.sub(r'[,\s\-;，。、\.]+$', '', text)
     return text
 
 APA_INLINE_PATTERN = re.compile(
