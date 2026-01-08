@@ -14,12 +14,18 @@ def parse_ieee_authors(authors_str):
     [Polyglot Version] 支援中英文作者解析
     中文姓名策略：不拆分 First/Last，全部視為 Last Name 以保持全名顯示。
     """
+    
     if not authors_str: return []
-
+    has_et_al = False
+    # 偵測並暫存 (支援 et al., et al, 以及中文 '等')
+    if re.search(r'(?:,?\s+et\s+al\.?|(?<!^)\s+等)\s*$', authors_str, re.IGNORECASE):
+        has_et_al = True
+        # 從字串中移除，避免干擾後續人名分割
+        authors_str = re.sub(r'(?:,?\s+et\s+al\.?|(?<!^)\s+等)\s*$', '', authors_str, flags=re.IGNORECASE)
+    
     # 1. 預處理：清理 "and", "&", "等"
     clean_str = re.sub(r',?\s+\b(and|&)\b\s+', ',', authors_str, flags=re.IGNORECASE)
     clean_str = re.sub(r'\s+等$', '', clean_str) # 移除中文 "等"
-    
     # 2. 分割作者
     # 支援中文頓號 (、) 和逗號
     raw_authors = [a.strip() for a in re.split(r'[,、]', clean_str) if a.strip()]
@@ -46,12 +52,13 @@ def parse_ieee_authors(authors_str):
                 first_name = " ".join(parts[:-1])
                 first_name = re.sub(r'\band\b', '', first_name, flags=re.IGNORECASE).strip()
                 parsed_list.append({'first': first_name, 'last': last_name})
-            
+    if has_et_al:
+        parsed_list.append({'first': '', 'last': 'et al.'})        
     return parsed_list
 
 def extract_ieee_reference_full(ref_text: str) -> dict:
     ref_text = normalize_text(ref_text)
-
+    
     # 先解析前面的 [n]，並拿到 rest_text
     m = re.match(r'^\s*[\[【]\s*(\d+)\s*[】\]]\s*(.*)$', ref_text)
     if m:
@@ -133,11 +140,14 @@ def extract_ieee_reference_full(ref_text: str) -> dict:
             result['url'] = raw_url.rstrip('.,;，。')
             rest_text = rest_text.replace(md_link_match.group(0), "") 
         else:
-            url_match = re.search(r'(https?://[^\s]+)', rest_text)
-            if url_match: 
-                # 移除 URL 末尾常見的標點符號，但小心不要移除路徑中的斜線
-                raw_url = url_match.group(1)
-                result['url'] = raw_url.rstrip('.,;，。)]}').strip()
+            url_match = re.search(r'(https?://.+?)(?=\s*(?:Available:|Retrieved|DOI:|\[|$))', rest_text, re.IGNORECASE | re.DOTALL)
+            
+            if url_match:
+                raw_url = url_match.group(1).strip()
+                # 移除 URL 內部的空白 (修復斷行)
+                clean_url = re.sub(r'\s+', '', raw_url)
+                # 移除末尾標點
+                result['url'] = clean_url.rstrip('.,;，。)]}')
             
             doi_match = re.search(r'doi:?\s*(10\.\d{4,}/[^\s,，。]+)', rest_text, re.IGNORECASE)
             if doi_match: result['doi'] = doi_match.group(1).rstrip('.')
@@ -183,7 +193,19 @@ def extract_ieee_reference_full(ref_text: str) -> dict:
                     result['authors'] = parts[0]
                     result['parsed_authors'] = parse_ieee_authors(parts[0])
                     if len(parts) >= 2: result['title'] = parts[1]
-                    if len(parts) >= 3: result['source'] = parts[2]
+                    if len(parts) >= 3: 
+                        raw_source = parts[2]
+                        # [重點修正] 強力清理 Source 殘留的 URL 片段與資料庫參數
+                        # 1. 移除看起來像檔案名的 (xxx.pdf)
+                        raw_source = re.sub(r'\b[\w\-\/\.]+\.pdf\b', '', raw_source, flags=re.IGNORECASE)
+                        # 2. 移除 UUID
+                        raw_source = re.sub(r'\b[0-9a-f]{8}-[0-9a-f]{4}-.*\b', '', raw_source, flags=re.IGNORECASE)
+                        # 3. 移除資料庫參數 (AN=..., lang=...)
+                        raw_source = re.sub(r'\b(AN|db|site|lang)=[a-zA-Z0-9\-_&]+', '', raw_source)
+                        # 4. 移除純數字或無意義符號
+                        if re.match(r'^[\d\s\/\.\-]+$', raw_source):
+                            raw_source = None
+                        result['source'] = raw_source
                 else:
                     # 第一段太長，視為標題 (無作者)
                     result['title'] = parts[0]
@@ -193,12 +215,43 @@ def extract_ieee_reference_full(ref_text: str) -> dict:
         # 針對學位論文從來源抓學校
         if result['source_type'] == 'Thesis/Dissertation' and result['source']:
             if "大學" in result['source']: result['publisher'] = result['source']
+        if result.get('source'):
+        # 1. 如果 Source 整串看起來就是一個 URL (http 開頭 或 包含 www./.com)
+            if re.search(r'^(https?://|www\.|.*\.com|.*\.org)', result['source'], re.IGNORECASE):
+                # 如果原本的 URL 欄位是空的，就把這個搬過去當 URL
+                if not result.get('url'):
+                    fixed_url = result['source']
+                    if not fixed_url.startswith('http') and not fixed_url.startswith('www'):
+                        pass # 只有 .com 結尾的可能不一定是 URL，先保守一點
+                    else:
+                        if not fixed_url.startswith('http'): fixed_url = 'http://' + fixed_url
+                        result['url'] = fixed_url
+            
+            # 清空 Source (因為它是 URL，不是期刊名)
+                result['source'] = None
+                result['journal_name'] = None
+                result['conference_name'] = None
 
+            # 2. 如果 Source "包含" URL 片段 (例如 "Some Journal https://...")，只移除 URL 部分
+            elif result.get('source'):
+                # 移除 http/https 開頭的字串
+                result['source'] = re.sub(r'https?://\S+', '', result['source'], flags=re.IGNORECASE)
+                # 移除 www. 開頭的字串
+                result['source'] = re.sub(r'www\.\S+', '', result['source'], flags=re.IGNORECASE)
+                
+                # 清理後移除多餘空白與標點
+                result['source'] = result['source'].strip().rstrip(',.;:/ ')
+                
+                # 如果清完變空了，就設為 None
+                if not result['source']:
+                    result['source'] = None
+                    result['journal_name'] = None
+                    result['conference_name'] = None
     else:
         # ==========================================
         #       英文解析邏輯
         # ==========================================
-
+        
         # === 標準 (Standard) 文獻專用解析 ===
         # 格式範例：[2] IEEE Transformer Committee, ANSI standard C57.13-1993, March 1994, IEEE Standard Requirements...
         std_match = re.search(r'\b(IEEE|ANSI|ISO|IEC)\s+(?:Std|Standard)\.?\s+([\w\d\.\-]+)', rest_text, re.IGNORECASE)
@@ -256,33 +309,56 @@ def extract_ieee_reference_full(ref_text: str) -> dict:
                 if len(parts) >= 2:
                     result['title'] = parts[-1]
                     result['source'] = ", ".join(parts[1:-1])
-
+            
             title_found = True
             after_title = ""
 
         else:
+            title_found = False
+        match = None
+        
+        # 策略 1: 貪婪匹配 (Greedy) - 尋找從第一個引號到「引號+逗號」之間的最長內容
+        # 適用於: S. Babiker et al., "Complete ... "real" ... FET's," IEEE Trans.
+        greedy_match = re.search(r'["“](.+)["”](?=\s*,)', rest_text)
+        
+        if greedy_match:
+            match = greedy_match
+        else:
+            # 策略 2: 如果沒逗號 (非標準格式)，退回非貪婪匹配 (Non-Greedy)
+            # 尋找第一個完整的引號對
             quote_patterns = [
-                (r'"', r'"'), (r'“', r'”'), (r'“', r'“'),  (r'”', r'”'),(r'\'', r'\'')
+                (r'"', r'"'), (r'“', r'”'), (r'“', r'“'),  (r'”', r'”'),(r'\'', r'\''),  (r'"', r'“')
             ]
-            
             for open_q, close_q in quote_patterns:
                 pattern = re.escape(open_q) + r'(.+?)' + re.escape(close_q)
-                match = re.search(pattern, rest_text)
-                if match:
-                    title = match.group(1).strip().rstrip(',.。;；:：')
-                    result['title'] = title
-                    before_title = rest_text[:match.start()].strip().rstrip(',. ')
-                    before_title = re.sub(r'\s+and\s*$', '', before_title, flags=re.IGNORECASE)
-                    before_title = re.sub(r',?\s*(?:et\s+al\.?|等)\s*$', '', before_title, flags=re.IGNORECASE)
-                    
-                    if before_title:
-                        result['authors'] = before_title
-                        if 'parse_ieee_authors' in globals():
-                            result['parsed_authors'] = parse_ieee_authors(before_title)
-                    
-                    after_title = rest_text[match.end():].strip()
-                    title_found = True
+                m = re.search(pattern, rest_text)
+                if m:
+                    match = m
                     break
+        
+        if match:
+            title = match.group(1).strip().rstrip(',.。;；:：')
+            
+            # 過濾誤判：如果標題太短且全是數字 (可能是年份被誤判)，忽略之
+            if len(title) < 5 and re.match(r'^\d+$', title):
+                pass
+            else:
+                result['title'] = title
+                
+                # 定位作者 (引號之前)
+                before_title = rest_text[:match.start()].strip().rstrip(',. ')
+                if before_title:
+                    result['authors'] = before_title
+                    result['parsed_authors'] = parse_ieee_authors(before_title)
+                
+                # 定位 Source (引號之後)
+                # match.end() 會停在引號處，需要跳過可能緊接的逗號
+                after_title_idx = match.end()
+                if after_title_idx < len(rest_text) and rest_text[after_title_idx] == ',':
+                    after_title_idx += 1
+                
+                after_title = rest_text[after_title_idx:].strip()
+                title_found = True
                 
         # 沒引號
         if not title_found:
@@ -863,7 +939,28 @@ def extract_ieee_reference_full(ref_text: str) -> dict:
                 result['source_type'] = 'Website/Online'
             elif re.search(r'(Ed\.|Eds\.|edition)', full_search_text, re.IGNORECASE):
                 result['source_type'] = 'Book'
+    def _strip_online_mark(s: str) -> str:
+        if not s or not isinstance(s, str):
+            return s
+        # normalize_text 會做 NFKC，全形括號通常已轉半形，所以這裡抓 [Online] / (Online)
+        s = re.sub(r'\s*[\[\(]\s*Online\s*[\]\)]\.?', '', s, flags=re.IGNORECASE)
+        return s.strip().strip(' ,.;:')
 
+    # 1) 清理標題尾巴的 [Online]
+    if result.get('title'):
+        result['title'] = _strip_online_mark(result['title'])
+        if result['title'] == '':
+            result['title'] = None
+
+    # 2) 清理來源欄位，把 "Available:" 這種殘留移除
+    if result.get('source'):
+        cleaned = clean_source_text(result['source'])  # ieee_parser.py 內已有 clean_source_text [file:12]
+        if cleaned:
+            result['source'] = cleaned
+
+        # 如果最後只剩 Available / Retrieved from / URL 這種，就當作沒有來源
+        if re.fullmatch(r'(Available|Retrieved\s+from|URL|Online|Website)\s*:?', result['source'], re.IGNORECASE):
+            result['source'] = None
     return result
 
 def clean_source_text(text):
