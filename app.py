@@ -40,14 +40,12 @@ with st.sidebar:
     st.subheader("📊 當前暫存狀態")
     st.metric("內文引用數量", len(st.session_state.in_text_citations))
     st.metric("參考文獻數量", len(st.session_state.reference_list))
-    st.metric("已驗證文獻", len(st.session_state.verified_references))
     
     st.markdown("---")
     st.subheader("🗑️ 清空資料")
     if st.button("清空所有暫存", type="secondary", use_container_width=True):
         st.session_state.in_text_citations = []
         st.session_state.reference_list = []
-        st.session_state.verified_references = []
         st.success("已清空所有暫存資料")
         st.rerun()
 
@@ -94,6 +92,5 @@ if st.session_state.in_text_citations or st.session_state.reference_list:
     with st.expander("🔍 查看完整暫存資料（JSON 格式）"):
         st.json({
             "in_text_citations": st.session_state.in_text_citations,
-            "reference_list": st.session_state.reference_list,
-            "verified_references": st.session_state.verified_references
+            "reference_list": st.session_state.reference_list
         })

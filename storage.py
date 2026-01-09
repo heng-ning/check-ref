@@ -7,9 +7,6 @@ def init_session_state():
     # 儲存參考文獻列表
     if 'reference_list' not in st.session_state:
         st.session_state.reference_list = []
-    # 儲存已透過 API 驗證過的正確文獻
-    if 'verified_references' not in st.session_state:
-        st.session_state.verified_references = []
     if 'missing_refs' not in st.session_state:
         st.session_state.missing_refs = []
     if 'unused_refs' not in st.session_state:
