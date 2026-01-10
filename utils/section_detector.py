@@ -4,7 +4,7 @@ def is_appendix_heading(text):
     """判斷是否為附錄標題"""
     text = text.strip()
     # 支援：Appendix, 附錄, 附錄一, Appendix A
-    pattern = r'^([【〔（(]?\s*)?((\d+|[IVXLCDM]+|[一二三四五六七八九十壹貳參肆伍陸柒捌玖拾]+)[、．. ]?)?\s*(附錄|APPENDIX)(\s*[】〕）)]?|(\s+[A-Z0-9]+))?$'
+    pattern = r'^([【〔（(]?\s*)?((\d+|[IVXLCDM]+|[一二三四五六七八九十壹貳參肆伍陸柒捌玖拾]+)[、．. ]?)?\s*(附錄|APPENDIX)(\s+[A-Z0-9]+)?([：:\.\s].*)?$'
     return bool(re.match(pattern, text, re.IGNORECASE))
 
 def is_reference_heading_flexible(text):
@@ -56,7 +56,38 @@ def is_pure_keyword(text):
     # 移除常見標點後比對
     clean_text = re.sub(r'[^\w\u4e00-\u9fff]', '', text)
     return clean_text in keywords
+def is_page_noise(text):
+    """
+    [新增] 判斷是否為頁首、頁尾、換頁分隔線或 IEEE 下載聲明
+    回傳 True 代表這是雜訊，應該跳過 (continue)
+    """
+    text = text.strip()
+    if not text: return True
 
+    # 1. 工具產生的換頁標記 (例如: --- PAGE 28 ---)
+    if re.match(r'^-+\s*PAGE\s*\d+\s*-+$', text, re.IGNORECASE):
+        return True
+
+    # 2. 常見頁碼格式 (例如: "59", "Page 10", "10 of 25", "- 10 -")
+    # 設定長度限制 < 20
+    if len(text) < 20 and re.match(r'^[-—\s]*(page\s*)?\d+(\s*of\s*\d+)?[-—\s]*$', text, re.IGNORECASE):
+        return True
+
+    # 3. 常見學位論文/期刊頁首 (根據您的檔案範例)
+    # 支援：NTPU, 碩士論文, Master Thesis, 學校名稱, 系所名稱
+    header_keywords = r'^(Master Thesis|碩士論文|Department of|National .* University|國立.*大學|.*研究所|NTPU|.*系\(?所\)?)$'
+    if re.match(header_keywords, text, re.IGNORECASE):
+        return True
+
+    # 4. 版權頁尾 (Copyright footer) - 短的版權宣告
+    if (text.startswith('©') or text.lower().startswith('copyright') or text.lower().startswith('all rights')) and len(text) < 60:
+        return True
+
+    # 5. IEEE Xplore 下載宣告
+    if "authorized licensed use limited to" in text.lower() and "ieee xplore" in text.lower():
+        return True
+
+    return False
 def extract_reference_section_improved(paragraphs):
     """
     支援斷行標題 (陸、\\n參考文獻) 與子標題保留
@@ -103,9 +134,11 @@ def extract_reference_section_improved(paragraphs):
         if not para: continue
         
         # 1. 遇到附錄或作者簡介 -> 停止
-        if is_appendix_heading(para) or re.match(r'^([0-9\.]+|[ivxlcdm]+)?\s*[\.\、\s]*(biography|about the author|作者簡介)', para, re.IGNORECASE):
-            break
-            
+        stop_keywords = r'(biography|about the author|acknowledgments?|index|declaration|copyright|作者簡介|致謝|誌謝|索引|著作權聲明|論文著作權)'
+        if is_appendix_heading(para) or re.match(r'^([0-9\.]+|[ivxlcdm]+|[一二三四五六七八九十]+)?\s*[\.\、\s]*' + stop_keywords, para, re.IGNORECASE):
+            break    
+        if is_page_noise(para):
+            continue
         # 2. 過濾掉重複的參考文獻標題 (跨頁頁眉)
         if is_reference_heading_flexible(para):
             continue
