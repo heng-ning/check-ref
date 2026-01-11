@@ -78,7 +78,9 @@ def display_citation_analysis(content_paras):
         st.warning(get_text("no_content"))
         return []
     
-    in_text_citations = extract_in_text_citations(content_paras)
+    # 傳入已解析的參考文獻列表
+    reference_list = st.session_state.get('reference_list', [])
+    in_text_citations = extract_in_text_citations(content_paras, reference_list)
     
     # 轉換為可序列化格式
     serializable_citations = []
@@ -93,7 +95,8 @@ def display_citation_analysis(content_paras):
             'normalized': cite.get('normalized'),
             'position': cite.get('position'),
             'type': cite.get('type'),
-            'format': cite.get('format')
+            'format': cite.get('format'),
+            'matched_ref_index': cite.get('matched_ref_index')  # 保存匹配到的參考文獻索引
         }
         serializable_citations.append(cite_dict)
     

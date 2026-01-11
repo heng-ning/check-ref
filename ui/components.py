@@ -209,29 +209,62 @@ def display_reference_with_details(ref, index, format_type='IEEE'):
             </div>
             """, unsafe_allow_html=True)
 
-# render_stat_card 保持不變，或也加上多語言參數
-
-def render_citation_list(citations):
+def render_citation_list(citations, reference_list=None):
     """
-    渲染內文引用列表
+    渲染內文引用列表，使用 reference_list 進行比對顯示（與比對邏輯一致）
+    
+    Args:
+        citations: 引用列表
+        reference_list: 參考文獻列表（用於比對和顯示匹配狀態）
     """
     if not citations:
         st.info(get_text("no_in_text_citation"))
         return
     
+    # 如果沒有提供 reference_list，嘗試從 session_state 獲取
+    if reference_list is None:
+        reference_list = st.session_state.get('reference_list', [])
+    
     with st.expander(get_text("in_text_citation_list")):
         for i, cite in enumerate(citations, 1):
+            # 檢查是否匹配到參考文獻
+            matched_ref = None
+            matched_ref_index = cite.get('matched_ref_index')
+            if matched_ref_index is not None and reference_list and 0 <= matched_ref_index < len(reference_list):
+                matched_ref = reference_list[matched_ref_index]
+            
             if cite['format'] == 'APA':
-                co_author_text = f" & {cite['co_author']}" if cite['co_author'] else ""
-                st.markdown(
-                    f"{i}. `{cite['original']}` — "
-                    f"**[{cite['format']}]** "
-                    f"{get_text('author_label')}：**{cite['author']}{co_author_text}** | "
-                    f"{get_text('year_label')}：**{cite['year']}** | "
-                    f"{get_text('type_label')}：{cite['type']}"
-                )
+                # 優先使用 reference_list 中的標準化作者和年份信息
+                if matched_ref:
+                    ref_authors = matched_ref.get('authors') or matched_ref.get('author')
+                    
+                    # 顯示完整的所有作者
+                    if isinstance(ref_authors, list):
+                        author_display = ", ".join(ref_authors)
+                    else:
+                        author_display = str(ref_authors)
+                    
+                    year_display = matched_ref.get('year')
+                    
+                    st.markdown(
+                        f"{i}. `{cite['original']}` — "
+                        f"**[{cite['format']}]** "
+                        f"{get_text('author_label')}：**{author_display}** | "
+                        f"{get_text('year_label')}：**{year_display}** | "
+                        f"{get_text('type_label')}：{cite.get('type', '?')}"
+                    )
+                else:
+                    # 沒有匹配到參考文獻，只顯示警告訊息
+                    st.markdown(
+                        f"{i}. `{cite['original']}` — "
+                        f"**[{cite['format']}]** "
+                        f"⚠️ 未找到對應參考文獻"
+                    )
             else:
+                # IEEE 格式
                 ref_display = cite.get('ref_number', '?')
+                
+                # 如果有 all_numbers 且數量大於 1，顯示完整列表
                 if cite.get('all_numbers') and len(cite['all_numbers']) > 1:
                     all_nums_str = ", ".join(cite['all_numbers'])
                     ref_display = f"{all_nums_str}"

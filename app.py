@@ -94,11 +94,11 @@ elif uploaded_file:
     # 分離內文與參考文獻
     content_paras, ref_paras, ref_start_idx, ref_keyword = classify_document_sections(all_paragraphs)
     
-    # 1. 內文引用分析
-    display_citation_analysis(content_paras)
-    
-    # 2. 參考文獻解析
+    # 先解析參考文獻
     display_reference_parsing(ref_paras)
+
+    # 再分析內文引用（使用已解析的參考文獻）
+    display_citation_analysis(content_paras)
     
     # 3. [新增] 自動執行交叉比對
     # 只要有解析出資料，且還沒做過比對（或者希望每次重新解析都跑），就自動執行
