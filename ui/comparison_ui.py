@@ -1,64 +1,73 @@
 import streamlit as st
 import json
+import csv
 import pandas as pd
 from datetime import datetime
 from checker import check_references
+from utils.i18n import get_text # 假設您有匯入翻譯
 
-def display_comparison_button():
-    """顯示比對按鈕並執行比對"""
-    st.header("🚀 交叉比對分析")
-    st.info("👆 請確認上方解析結果無誤後，點擊下方按鈕開始檢查。")
+def run_comparison():
+    """執行交叉比對並更新 session_state"""
+    if not st.session_state.in_text_citations or not st.session_state.reference_list:
+        return False
+        
+    missing, unused, year_errors = check_references(
+        st.session_state.in_text_citations,
+        st.session_state.reference_list
+    )
     
-    if st.button("開始交叉比對", type="primary", use_container_width=True):
-        if not st.session_state.in_text_citations or not st.session_state.reference_list:
-            st.error("❌ 資料不足，無法比對。請確認是否已成功解析內文引用與參考文獻。")
-        else:
-            with st.spinner("正在進行雙向交叉比對..."):
-                missing, unused, year_errors = check_references(
-                    st.session_state.in_text_citations,
-                    st.session_state.reference_list
-                )
-                
-                st.session_state.missing_refs = missing
-                st.session_state.unused_refs = unused
-                st.session_state.year_error_refs = year_errors
-                st.session_state.comparison_done = True
-                
-                st.success("✅ 比對完成！")
+    st.session_state.missing_refs = missing
+    st.session_state.unused_refs = unused
+    st.session_state.year_error_refs = year_errors
+    st.session_state.comparison_done = True
+    return True
+
+# def display_comparison_button():
+#     """顯示比對按鈕（手動觸發用）"""
+#     st.header(get_text("comparison_title"))
+    
+#     if st.button(get_text("manual_recompare"), type="secondary", use_container_width=True):
+#         if not run_comparison():
+#              st.error(get_text("compare_fail_msg"))
+#         else:
+#              st.success(get_text("compare_success"))
+
 
 def display_missing_tab():
     """顯示遺漏的參考文獻 Tab"""
-    st.caption("💡 說明：這些引用出現在內文中，但在參考文獻列表裡找不到對應項目。")
+    st.caption(get_text("missing_desc"))
     
     missing_refs = st.session_state.get('missing_refs', [])
     
     if not missing_refs:
-        st.success("✅ 太棒了！所有內文引用都在參考文獻列表中找到了。")
+        st.success(get_text("missing_success"))
     else:
         for i, item in enumerate(missing_refs, 1):
-            st.error(f"{i}. **{item['original']}** (格式: {item['format']})", icon="🚨")
+            st.error(f"{i}. **{item['original']}** ({get_text('fmt_label')}: {item['format']})", icon="🚨")
+
 
 def display_unused_tab():
     """顯示未使用的參考文獻 Tab"""
-    st.caption("💡 說明：這些文獻列在參考文獻列表中，但在內文中從未被引用過。")
+    st.caption(get_text("unused_desc"))
     
     unused_refs = st.session_state.get('unused_refs', [])
     pure_unused = [item for item in unused_refs if not item.get('year_mismatch')]
     
     if not pure_unused:
-        st.success("✅ 太棒了！所有參考文獻都在內文中被有效引用。")
+        st.success(get_text("unused_success"))
     else:
         for i, item in enumerate(pure_unused, 1):
-            st.warning(f"{i}. **{item.get('original', '未知文獻')[:150]}...**")
+            st.warning(f"{i}. **{item.get('original', get_text('unknown_ref'))[:150]}...**")
+
 
 def display_year_error_tab():
     """顯示疑似年份錯誤 Tab"""
-    st.caption("💡 說明：這些文獻的作者匹配，但年份不一致。")
+    st.caption(get_text("year_error_desc"))
     
     year_error_refs = st.session_state.get('year_error_refs', [])
     
     if not year_error_refs:
-        st.success("✅ 沒有發現年份錯誤。")
+        st.success(get_text("year_error_success"))
     else:
         # 去重
         seen_originals = set()
@@ -71,15 +80,16 @@ def display_year_error_tab():
         
         for i, item in enumerate(unique_refs, 1):
             with st.container():
-                st.error(f"**{i}. {item.get('original', '未知文獻')[:100]}...**")
+                st.error(f"**{i}. {item.get('original', get_text('unknown_ref'))[:100]}...**")
                 
-                with st.expander("⚠️ 疑似年份引用錯誤", expanded=False):
+                with st.expander(get_text("year_error_expander"), expanded=False):
                     for mismatch in item.get('year_mismatch', []):
-                        st.write(f"文中引用的是 {mismatch['citation']}")
+                        st.write(f"{get_text('citation_in_text')} {mismatch['citation']}")
+
 
 def display_export_section():
     """顯示匯出功能區"""
-    st.subheader("📥 匯出比對結果")
+    st.subheader(get_text("export_title"))
     
     missing_refs = st.session_state.get('missing_refs', [])
     unused_refs = st.session_state.get('unused_refs', [])
@@ -95,25 +105,40 @@ def display_export_section():
     
     # 準備 CSV
     def to_df(items, kind):
+        # 定義 CSV 欄位名稱 (如果要支援多語言匯出，這裡也要用 get_text)
+        # 但通常 CSV 欄位名稱保持英文比較好處理，這裡示範用多語言表頭
+        columns = [
+            get_text("csv_header_type"), 
+            get_text("csv_header_original"), 
+            get_text("csv_header_format"), 
+            get_text("csv_header_ref_num"), 
+            get_text("csv_header_author"), 
+            get_text("csv_header_year"), 
+            get_text("csv_header_detail")
+        ]
+        
         if not items:
-            return pd.DataFrame(columns=["type", "original", "format", "ref_number", "author", "year", "error_detail"])
+            return pd.DataFrame(columns=columns)
+            
         rows = []
         for x in items:
             error_detail = ""
             if 'year_mismatch' in x and x['year_mismatch']:
                 mismatch_info = []
                 for m in x['year_mismatch']:
-                    mismatch_info.append(f"內文:{m['cited_year']}→正確:{m['correct_year']}")
+                    # 使用格式化字串
+                    detail_str = get_text("err_detail_format", cited=m['cited_year'], correct=m['correct_year'])
+                    mismatch_info.append(detail_str)
                 error_detail = "; ".join(mismatch_info)
             
             rows.append({
-                "type": kind,
-                "original": x.get("original", ""),
-                "format": x.get("format", ""),
-                "ref_number": x.get("ref_number", ""),
-                "author": x.get("author", ""),
-                "year": x.get("year", ""),
-                "error_detail": error_detail
+                columns[0]: kind,
+                columns[1]: x.get("original", ""),
+                columns[2]: x.get("format", ""),
+                columns[3]: x.get("ref_number", ""),
+                columns[4]: x.get("author", ""),
+                columns[5]: x.get("year", ""),
+                columns[6]: error_detail
             })
         return pd.DataFrame(rows)
     
@@ -121,14 +146,16 @@ def display_export_section():
     df_unused = to_df(unused_refs, "unused")
     df_year_error = to_df(year_error_refs, "year_error")
     df_export = pd.concat([df_missing, df_unused, df_year_error], ignore_index=True)
-    csv_bytes = df_export.to_csv(index=False).encode("utf-8")
+    
+    # 使用 utf-8-sig + quoting=QUOTE_ALL 解決 Excel 亂碼與欄位錯位
+    csv_bytes = df_export.to_csv(index=False, quoting=csv.QUOTE_ALL).encode("utf-8-sig")
     
     # 下載按鈕
     col_json, col_csv = st.columns(2)
     
     with col_json:
         st.download_button(
-            label="⬇️ 下載 JSON(遺漏 / 未使用 / 年份錯誤)",
+            label=get_text("download_json"),
             data=json_bytes,
             file_name=f"citation_check_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
             mime="application/json",
@@ -138,7 +165,7 @@ def display_export_section():
     
     with col_csv:
         st.download_button(
-            label="⬇️ 下載 CSV(遺漏 / 未使用 / 年份錯誤)",
+            label=get_text("download_csv"),
             data=csv_bytes,
             file_name=f"citation_check_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv",
@@ -146,9 +173,10 @@ def display_export_section():
             key="download_csv_button"
         )
 
+
 def display_comparison_results():
     """顯示完整的比對結果（含三個 Tabs 和匯出）"""
-    st.subheader("📊 比對結果報告")
+    st.subheader(get_text("report_title"))
     
     missing_count = len(st.session_state.get('missing_refs', []))
     unused_refs_all = st.session_state.get('unused_refs', [])
@@ -156,9 +184,9 @@ def display_comparison_results():
     year_error_count = len(st.session_state.get('year_error_refs', []))
     
     tab1, tab2, tab3 = st.tabs([
-        f"❌ 遺漏的參考文獻 ({missing_count})",
-        f"⚠️ 未使用的參考文獻 ({pure_unused_count})",
-        f"📅 疑似年份錯誤 ({year_error_count})"
+        get_text("tab_missing", count=missing_count),
+        get_text("tab_unused", count=pure_unused_count),
+        get_text("tab_year_error", count=year_error_count)
     ])
     
     with tab1:

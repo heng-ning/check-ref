@@ -11,31 +11,59 @@ from parsers.apa.apa_merger import merge_references_unified
 from reference_router import process_single_reference
 from ui.components import (
     display_reference_with_details,
-    render_stat_card,
     render_citation_list
 )
+from utils.i18n import get_text  # [新增] 匯入翻譯函式
+
+def render_stat_card(title, value, color_scheme="primary"):
+    border_style = ""
+
+    if color_scheme == "primary":
+        bg_color = "#FAF0E6"
+        text_color = "#4B2E1E"
+        box_shadow = "0 4px 6px rgba(0,0,0,0.3)"
+    elif color_scheme == "secondary":
+        bg_color = "rgba(242, 231, 203, 0.8)"
+        text_color = "#761A0A"
+        border_style = "border: 3px solid #844200;"
+        box_shadow = "0 4px 6px rgba(0,0,0,0.1)"
+    else:
+        bg_color = "rgba(242, 231, 203, 0.8)"
+        text_color = "#761A0A"
+        border_style = "border: 3px solid #844200;"
+        box_shadow = "0 4px 6px rgba(0,0,0,0.1)"
+
+    html_content = (
+        f'<div style="background: {bg_color}; {border_style} border-radius: 30px; '
+        f'padding: 15px; text-align: center; color: {text_color}; '
+        f'box-shadow: {box_shadow}; height: 160px; display: flex; '
+        f'flex-direction: column; justify-content: center;">'
+        f'<div style="font-size: 25px; opacity: 0.9; margin-bottom: 5px; font-weight: bold;">{title}</div>'
+        f'<div style="font-size: 45px; font-weight: bold;">{value}</div>'
+        f'</div>'
+    )
+    st.markdown(html_content, unsafe_allow_html=True)
 
 def handle_file_upload(uploaded_file):
     """
     處理檔案上傳與初始讀取
-    
-    Returns:
-        all_paragraphs: 所有段落列表
     """
+    # [移除] 這裡的語言選擇器程式碼 (已搬移至 app.py)
+
     file_ext = uploaded_file.name.split(".")[-1].lower()
     
-    st.subheader(f"📄 處理檔案：{uploaded_file.name}")
+    st.subheader(f"{get_text('file_processing')}{uploaded_file.name}")
     
-    with st.spinner("正在讀取檔案..."):
+    with st.spinner(get_text("reading_file")):
         if file_ext == "docx":
             all_paragraphs = extract_paragraphs_from_docx(uploaded_file)
         elif file_ext == "pdf":
             all_paragraphs = extract_paragraphs_from_pdf(uploaded_file)
         else:
-            st.error("不支援的檔案格式")
+            st.error(get_text("unsupported_file"))
             st.stop()
     
-    st.success(f"✅ 成功讀取 {len(all_paragraphs)} 個段落")
+    st.success(get_text("read_success", count=len(all_paragraphs)))
     st.markdown("---")
     
     return all_paragraphs
@@ -43,14 +71,11 @@ def handle_file_upload(uploaded_file):
 def display_citation_analysis(content_paras):
     """
     顯示內文引用分析結果
-    
-    Returns:
-        in_text_citations: 提取的內文引用列表
     """
-    st.subheader("🔍 內文引用分析")
+    st.subheader(get_text("citation_analysis"))
     
     if not content_paras:
-        st.warning("無內文段落可供分析")
+        st.warning(get_text("no_content"))
         return []
     
     in_text_citations = extract_in_text_citations(content_paras)
@@ -81,35 +106,33 @@ def display_citation_analysis(content_paras):
     col1, col2, col3 = st.columns([2, 4, 4])
     
     with col1:
-        render_stat_card("內文引用總數", len(in_text_citations), "primary")
+        render_stat_card(get_text("total_citations"), len(in_text_citations), "primary")
     
     with col2:
-        render_stat_card("「APA 格式」引用", apa_count, "secondary")
+        render_stat_card(get_text("apa_citations"), apa_count, "secondary")
     
     with col3:
-        render_stat_card("「IEEE 格式」引用", ieee_count, "secondary")
+        render_stat_card(get_text("ieee_citations"), ieee_count, "secondary")
     
     st.markdown("---")
     
-    # 顯示引用列表
+    # 顯示引用列表 (這個組件若還沒多語言化，可能還是會顯示中文)
     render_citation_list(in_text_citations)
     
     st.markdown("---")
     
     return in_text_citations
 
+
 def display_reference_parsing(ref_paras):
     """
     顯示參考文獻解析結果
-    
-    Returns:
-        parsed_refs: 解析後的參考文獻列表
     """
     if not ref_paras:
-        st.warning("未找到參考文獻區段")
+        st.warning(get_text("no_ref_section"))
         return []
     
-    st.subheader("📖 參考文獻詳細解析與轉換")
+    st.subheader(get_text("ref_parsing"))
     
     # 自動偵測格式
     is_ieee_mode = False
@@ -120,17 +143,17 @@ def display_reference_parsing(ref_paras):
             break
     
     if is_ieee_mode:
-        st.info("💡 偵測到 IEEE 編號格式")
+        st.info(get_text("detect_ieee"))
         merged_refs = merge_references_ieee_strict(ref_paras)
     else:
-        st.info("💡 偵測到 APA 格式")
+        st.info(get_text("detect_apa"))
         merged_refs = merge_references_unified(ref_paras)
     
     # 解析參考文獻
     parsed_refs = [process_single_reference(r) for r in merged_refs]
     st.session_state.reference_list = parsed_refs
     
-    st.info(f"成功解析出 {len(parsed_refs)} 筆參考文獻")
+    st.info(get_text("parse_success", count=len(parsed_refs)))
     
     # 分類統計
     apa_refs = []
@@ -149,32 +172,32 @@ def display_reference_parsing(ref_paras):
     col1, col2, col3 = st.columns([2, 4, 4])
     
     with col1:
-        render_stat_card("參考文獻總數", len(parsed_refs), "primary")
+        render_stat_card(get_text("total_refs"), len(parsed_refs), "primary")
     
     with col2:
-        render_stat_card("「APA」格式", len(apa_refs), "secondary")
+        render_stat_card(get_text("apa_refs_count"), len(apa_refs), "secondary")
     
     with col3:
-        render_stat_card("「IEEE」格式", len(ieee_refs), "secondary")
+        render_stat_card(get_text("ieee_refs_count"), len(ieee_refs), "secondary")
     
     st.markdown("---")
     
     # 顯示 IEEE 參考文獻
-    st.markdown("### 📖 IEEE 格式參考文獻")
+    st.markdown(get_text("ieee_ref_header"))
     if ieee_refs:
         for i, ref in enumerate(ieee_refs, 1):
             display_reference_with_details(ref, i, format_type='IEEE')
     else:
-        st.info("無 IEEE 格式參考文獻")
+        st.info(get_text("no_ieee_refs"))
     
     st.markdown("---")
     
     # 顯示 APA 參考文獻
-    st.markdown("### 📚 APA 與其他格式參考文獻")
+    st.markdown(get_text("apa_ref_header"))
     if apa_refs:
         for i, ref in enumerate(apa_refs, 1):
             display_reference_with_details(ref, i, format_type='APA')
     else:
-        st.info("無 APA 格式參考文獻")
+        st.info(get_text("no_apa_refs"))
     
     return parsed_refs

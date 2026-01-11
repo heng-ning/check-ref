@@ -9,62 +9,83 @@ from ui.file_upload import (
     display_reference_parsing
 )
 from ui.comparison_ui import (
-    display_comparison_button,
-    display_comparison_results
+    # display_comparison_button,
+    display_comparison_results,
+    run_comparison 
 )
-from citation.in_text_extractor import extract_in_text_citations 
+from citation.in_text_extractor import extract_in_text_citations
+from utils.i18n import get_text  # [新增] 匯入翻譯函式
+
 # ==================== 頁面設定 ====================
-st.set_page_config(page_title="文獻檢查系統", layout="wide")
+st.set_page_config(page_title="Citation Checker", layout="wide")
 
 # 初始化 session state
 init_session_state()
 
-# ==================== 標題區 ====================
-st.title("📚 學術文獻引用檢查系統")
+# [新增] 語言設定初始化
+if 'language' not in st.session_state:
+    st.session_state.language = 'zh'
 
-st.markdown("""
-### ✨ 功能特色
-1. ✅ **參考文獻完整性檢查**：比對「參考文獻列表」與「內文引用」，找出遺漏引用與未使用文獻。
-2. ✅ **內文引用一致性檢查**：檢查內文中的作者、年份或編號是否都能正確對應到參考文獻。
-3. ✅ **中英混合與格式自動辨識**：智慧偵測 APA / IEEE / 中文數字編號等格式，並支援中英文文獻混排。
-4. ✅ **深度欄位解析與格式轉換**：精準拆解作者、年份、篇名、期刊／會議名稱、頁碼、DOI、URL，並提供 APA ⇄ IEEE、自編號 ⇄ APA 等互轉。
-5. ✅ **互動式檢查報表與匯出**：在介面中逐筆檢視解析結果與問題項目，並支援資料匯出／匯入以便後續校對與保存         
-""")
+# ==================== 側邊欄：語言與資料管理 ====================
+with st.sidebar:
+    # 1. 語言設定 (最優先顯示)
+    st.markdown(get_text("lang_settings"))
+    lang_choice = st.radio(
+        get_text("lang_select"),
+        options=["繁體中文", "English"],
+        index=0 if st.session_state.language == 'zh' else 1,
+        key="language_radio"
+    )
+    # 更新 session state
+    st.session_state.language = 'zh' if lang_choice == "繁體中文" else 'en'
+    
+    st.markdown("---")
+
+    # 2. 資料管理
+    st.header(get_text("data_manage"))
+    
+    st.subheader(get_text("current_status"))
+    st.metric(get_text("in_text_count"), len(st.session_state.in_text_citations))
+    st.metric(get_text("ref_count"), len(st.session_state.reference_list))
+    
+    st.markdown("---")
+    st.subheader(get_text("clear_data"))
+    if st.button(get_text("clear_btn"), type="secondary", use_container_width=True):
+        st.session_state.in_text_citations = []
+        st.session_state.reference_list = []
+        st.success(get_text("clear_success"))
+        st.rerun()
+
+# ==================== 主區域 ====================
+st.title(get_text("page_title"))
+
+# 功能特色說明 (使用 get_text)
+st.markdown(get_text("features_title"))
+st.markdown(get_text("feature_1"))
+st.markdown(get_text("feature_2"))
+st.markdown(get_text("feature_3"))
+st.markdown(get_text("feature_4"))
+st.markdown(get_text("feature_5"))
 
 st.markdown("---")
 
-# ==================== 側邊欄：資料管理 ====================
-with st.sidebar:
-    st.header("💾 資料管理")
-    
-    st.subheader("📊 當前暫存狀態")
-    st.metric("內文引用數量", len(st.session_state.in_text_citations))
-    st.metric("參考文獻數量", len(st.session_state.reference_list))
-    
-    st.markdown("---")
-    st.subheader("🗑️ 清空資料")
-    if st.button("清空所有暫存", type="secondary", use_container_width=True):
-        st.session_state.in_text_citations = []
-        st.session_state.reference_list = []
-        st.success("已清空所有暫存資料")
-        st.rerun()
-
 # ==================== 主區域：檔案上傳 ====================
-uploaded_file = st.file_uploader("請上傳 Word 或 PDF 檔案", type=["docx", "pdf"])
+uploaded_file = st.file_uploader(get_text("upload_label"), type=["docx", "pdf"])
 
 if not uploaded_file and (st.session_state.in_text_citations or st.session_state.reference_list):
-    st.info("📥 顯示已匯入的資料")
+    st.info(get_text("show_imported"))
 
 elif uploaded_file:
     # 檢查是否為新檔案
     current_file_id = f"{uploaded_file.name}_{uploaded_file.size}"
     
+    # [關鍵修改] 判斷是否為新檔案，如果是，重置狀態並準備重新分析
     if st.session_state.get('last_file_id') != current_file_id:
         st.session_state.in_text_citations = []
         st.session_state.reference_list = []
         st.session_state.missing_refs = []
         st.session_state.unused_refs = []
-        st.session_state.comparison_done = False
+        st.session_state.comparison_done = False # 重置比對狀態
         st.session_state.last_file_id = current_file_id
     
     # 讀取檔案
@@ -73,24 +94,29 @@ elif uploaded_file:
     # 分離內文與參考文獻
     content_paras, ref_paras, ref_start_idx, ref_keyword = classify_document_sections(all_paragraphs)
     
-    # 內文引用分析
+    # 1. 內文引用分析
     display_citation_analysis(content_paras)
     
-    # 參考文獻解析
+    # 2. 參考文獻解析
     display_reference_parsing(ref_paras)
+    
+    # 3. [新增] 自動執行交叉比對
+    # 只要有解析出資料，且還沒做過比對（或者希望每次重新解析都跑），就自動執行
+    if st.session_state.in_text_citations and st.session_state.reference_list:
+        if not st.session_state.get('comparison_done', False):
+            with st.spinner("正在自動進行交叉比對..."):
+                run_comparison()
 
 st.markdown("---")
 
-# ==================== 交叉比對分析 ====================
-display_comparison_button()
+# ==================== 交叉比對分析結果區 ====================
+# [修改] 這裡可以選擇是否還要顯示「手動比對按鈕」。
+# 如果您希望完全自動化，可以把 display_comparison_button() 拿掉，
+# 或者保留它當作「重新整理」的按鈕。
 
+# 顯示結果 (只要 comparison_done 為 True 就顯示)
 if st.session_state.get('comparison_done', False):
     display_comparison_results()
-
-# ==================== 查看暫存資料 ====================
-if st.session_state.in_text_citations or st.session_state.reference_list:
-    with st.expander("🔍 查看完整暫存資料（JSON 格式）"):
-        st.json({
-            "in_text_citations": st.session_state.in_text_citations,
-            "reference_list": st.session_state.reference_list
-        })
+# else:
+#     # 如果還沒完成比對 (例如解析失敗)，顯示手動按鈕讓使用者嘗試
+#     display_comparison_button()
