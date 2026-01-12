@@ -27,7 +27,7 @@ def validate_ieee_format(ref: dict, index: int) -> Tuple[bool, List[str]]:
     # 2. 必須有作者
     authors = ref.get('authors') or ref.get('parsed_authors')
     if not authors:
-        errors.append(f"缺少作者資訊")
+        errors.append(f"無法解析作者（必要比對條件）：可能為團體作者、專案名稱或格式非標準")
     elif isinstance(authors, list) and len(authors) == 0:
         errors.append(f"作者列表為空")
     
@@ -124,7 +124,7 @@ def validate_apa_format(ref: dict, index: int) -> Tuple[bool, List[str]]:
     # 1. 必須有作者
     authors = ref.get('authors') or ref.get('author')
     if not authors:
-        errors.append(f"缺少作者資訊")
+        errors.append(f"無法解析作者（必要比對條件）：可能為團體作者、專案名稱或格式非標準")
     elif isinstance(authors, list) and len(authors) == 0:
         errors.append(f"作者列表為空")
     
@@ -294,3 +294,108 @@ def get_validation_summary(validation_results: List[Dict]) -> Dict:
         'error_types': error_types,
         'format_type': validation_results[0]['format_type'] if validation_results else 'Unknown'
     }
+# reference_validator.py (新增：折衷版驗證)
+
+from typing import Dict, List, Tuple
+
+def validate_required_fields(ref: dict, format_type: str) -> Tuple[bool, List[str]]:
+    """
+    只檢查『交叉比對必要條件』：作者 + 年份
+    缺任一項 -> critical error
+    """
+    errors = []
+    original = ref.get("original", "")
+
+    # authors 欄位在 IEEE/APA 可能不同
+    if format_type == "IEEE":
+        authors = ref.get("authors") or ref.get("parsed_authors")
+    else:
+        authors = ref.get("authors") or ref.get("author")
+
+    if not authors or (isinstance(authors, list) and len(authors) == 0):
+        errors.append("無法解析作者（必要比對條件）：可能為團體作者、專案名稱或格式非標準")
+
+    year = ref.get("year")
+    if not year:
+        # 你的 IEEE 原本有做「原文是否有年份」的容錯，我保留這個邏輯
+        has_year_in_original = bool(re.search(r'(?<!\d)(19\d{2}|20[0-2]\d)(?!\d)|民國\s*\d{2,3}', original))
+        if not has_year_in_original:
+            errors.append("缺少出版年份（必要比對條件）")
+
+    return (len(errors) == 0), errors
+
+
+def validate_optional_fields(ref: dict, format_type: str) -> Tuple[bool, List[str]]:
+    """
+    非必要欄位：缺了不擋比對，但要回報 warnings
+    例如：title / doi / source 等
+    """
+    warnings = []
+    original = ref.get("original", "")
+
+    # 標題（你們最常痛的）
+    title = ref.get("title")
+    # IEEE 你原本對 thesis 有特例；這裡也沿用（避免誤殺）
+    is_thesis_format = bool(re.search(r'(Dissertation|Thesis|碩士|博士)\s*[-–—]\s*', original))
+    if (not title) and (not is_thesis_format):
+        warnings.append("缺少文獻標題（非必要欄位，仍可比對，但解析資訊不完整）")
+
+    # DOI / URL
+    if not ref.get("doi") and not ref.get("url"):
+        warnings.append("缺少 DOI/URL（非必要欄位）")
+
+    # 出處（source / journal / conference / publisher 任一）
+    has_venue = bool(ref.get("source") or ref.get("journal_name") or ref.get("conference_name") or ref.get("publisher"))
+    if not has_venue:
+        warnings.append("缺少出處/來源資訊（期刊/會議/出版社等）（非必要欄位）")
+
+    return (len(warnings) == 0), warnings
+
+
+def validate_reference_list_relaxed(reference_list: List[dict], format_type: str = "auto") -> Tuple[bool, List[Dict], List[Dict]]:
+    """
+    折衷版：
+    - critical_results：必要條件（作者+年份）缺失 -> 會導致報錯停止
+    - warning_results：其他欄位缺失 -> 只顯示警告但不停止
+    Returns:
+      (critical_ok, critical_results, warning_results)
+    """
+    if not reference_list:
+        return False, [], []
+
+    # auto 判斷沿用原本邏輯
+    if format_type == "auto":
+        first_ref = reference_list[0]
+        format_type = "IEEE" if first_ref.get("ref_number") else "APA"
+
+    critical_ok = True
+    critical_results = []
+    warning_results = []
+
+    for i, ref in enumerate(reference_list, 1):
+        ok_req, req_errors = validate_required_fields(ref, format_type)
+        ok_opt, opt_warnings = validate_optional_fields(ref, format_type)
+
+        short_original = ref.get("original", "")
+        short_original = short_original[:100] + "..." if len(short_original) > 100 else short_original
+
+        if not ok_req:
+            critical_ok = False
+            critical_results.append({
+                "index": i,
+                "ref_number": ref.get("ref_number", i),
+                "original": short_original,
+                "errors": req_errors,
+                "format_type": format_type
+            })
+
+        if not ok_opt:
+            warning_results.append({
+                "index": i,
+                "ref_number": ref.get("ref_number", i),
+                "original": short_original,
+                "warnings": opt_warnings,
+                "format_type": format_type
+            })
+
+    return critical_ok, critical_results, warning_results

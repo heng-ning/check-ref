@@ -155,83 +155,48 @@ def display_reference_parsing(ref_paras):
     # 解析參考文獻
     parsed_refs = [process_single_reference(r) for r in merged_refs]
 
-    # ===== 格式驗證 =====
-    from utils.reference_validator import validate_reference_list, get_validation_summary
-    
-    # 自動判斷格式並驗證
+        # ===== 折衷版驗證（必要條件 vs 非必要欄位警告）=====
+    from utils.reference_validator import validate_reference_list_relaxed
     format_type = 'IEEE' if is_ieee_mode else 'APA'
-    all_valid, validation_results = validate_reference_list(parsed_refs, format_type)
-    summary = get_validation_summary(validation_results)
-    
-    # 如果驗證失敗，顯示錯誤並停止
-    if not all_valid:
-        st.error(f"⚠️ 參考文獻格式驗證失敗！發現 {summary['invalid_count']} 筆錯誤")
-        
-        # 顯示錯誤詳情
-        for result in validation_results:
-            if not result['is_valid']:
-                # 從 parsed_refs 中找到對應的完整原文
-                full_original = parsed_refs[result['index'] - 1].get('original', result['original'])
-                with st.expander(f"❌ 第 {result['index']} 筆 - {full_original[:50]}...", expanded=True):
-                    st.markdown(f"**完整原文：**")
-                    st.code(full_original, language="text")
-                    st.markdown(f"**格式類型：** {result['format_type']}")
-                    st.markdown(f"**錯誤項目：**")
-                    for error in result['errors']:
-                        st.markdown(f"- {error}")
-        
-        st.info("💡 請修正上述錯誤後重新上傳檔案")
-        st.stop()  # 停止執行
-    else:
-        st.success(f"✅ 所有參考文獻格式檢查通過！")
 
+    critical_ok, critical_results, warning_results = validate_reference_list_relaxed(parsed_refs, format_type)
+
+    # 1) 必要條件不通過：直接報錯並停止（不做比對）
+    if not critical_ok:
+        st.error(f"⛔ 參考文獻缺少必要比對條件（作者/年份），共 {len(critical_results)} 筆需修正後再上傳。")
+
+        for result in critical_results:
+            full_original = parsed_refs[result["index"] - 1].get("original", result["original"])
+            with st.expander(f"❌ 第 {result['index']} 筆 - {full_original[:50]}...", expanded=True):
+                st.markdown("**完整原文：**")
+                st.code(full_original, language="text")
+                st.markdown(f"**偵測格式：** {result['format_type']}")
+                st.markdown("**必要條件缺失：**")
+                for err in result["errors"]:
+                    st.markdown(f"- {err}")
+
+        st.info("💡 請修正上述必要條件（作者/年份）後重新上傳檔案")
+        st.stop()
+
+    # ✅ 必要條件通過：先寫入 session（允許後續內文分析與交叉比對）
     st.session_state.reference_list = parsed_refs
-    
-    st.info(get_text("parse_success", count=len(parsed_refs)))
-    
-    # 分類統計
-    apa_refs = []
-    ieee_refs = []
-    for r in parsed_refs:
-        if r.get('ref_number'):
-            ieee_refs.append(r)
-        else:
-            fmt = str(r.get('format', ''))
-            if fmt.startswith('APA'):
-                apa_refs.append(r)
-            else:
-                ieee_refs.append(r)
-    
-    # 統計卡片
-    col1, col2, col3 = st.columns([2, 4, 4])
-    
-    with col1:
-        render_stat_card(get_text("total_refs"), len(parsed_refs), "primary")
-    
-    with col2:
-        render_stat_card(get_text("apa_refs_count"), len(apa_refs), "secondary")
-    
-    with col3:
-        render_stat_card(get_text("ieee_refs_count"), len(ieee_refs), "secondary")
-    
-    st.markdown("---")
-    
-    # 顯示 IEEE 參考文獻
-    st.markdown(get_text("ieee_ref_header"))
-    if ieee_refs:
-        for i, ref in enumerate(ieee_refs, 1):
-            display_reference_with_details(ref, i, format_type='IEEE')
+
+    # 2) 非必要欄位缺失：顯示警告（但不停止、不影響比對）
+    if warning_results:
+        st.warning(f"⚠️ 參考文獻解析資訊不完整（非必要欄位缺失）共 {len(warning_results)} 筆：仍可進行交叉比對，但欄位展示可能不完整。")
+        with st.expander("查看非必要欄位缺失詳情（不影響交叉比對）", expanded=False):
+            for w in warning_results:
+                full_original = parsed_refs[w["index"] - 1].get("original", w["original"])
+
+                title = f"⚠️ 第 {w['index']} 筆 - {w.get('format_type', '')}"
+                with st.expander(title, expanded=False):
+                    st.markdown("**完整原文：**")
+                    st.code(full_original, language="text")
+
+                    st.markdown(f"**偵測格式：** {w.get('format_type', 'Unknown')}")
+
+                    st.markdown("**非必要欄位缺失：**")
+                    for msg in w["warnings"]:
+                        st.markdown(f"- {msg}")
     else:
-        st.info(get_text("no_ieee_refs"))
-    
-    st.markdown("---")
-    
-    # 顯示 APA 參考文獻
-    st.markdown(get_text("apa_ref_header"))
-    if apa_refs:
-        for i, ref in enumerate(apa_refs, 1):
-            display_reference_with_details(ref, i, format_type='APA')
-    else:
-        st.info(get_text("no_apa_refs"))
-    
-    return parsed_refs
+        st.success("✅ 參考文獻必要條件通過，且欄位解析完整度良好。")
