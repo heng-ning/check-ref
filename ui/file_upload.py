@@ -154,6 +154,37 @@ def display_reference_parsing(ref_paras):
     
     # 解析參考文獻
     parsed_refs = [process_single_reference(r) for r in merged_refs]
+
+    # ===== 格式驗證 =====
+    from utils.reference_validator import validate_reference_list, get_validation_summary
+    
+    # 自動判斷格式並驗證
+    format_type = 'IEEE' if is_ieee_mode else 'APA'
+    all_valid, validation_results = validate_reference_list(parsed_refs, format_type)
+    summary = get_validation_summary(validation_results)
+    
+    # 如果驗證失敗，顯示錯誤並停止
+    if not all_valid:
+        st.error(f"⚠️ 參考文獻格式驗證失敗！發現 {summary['invalid_count']} 筆錯誤")
+        
+        # 顯示錯誤詳情
+        for result in validation_results:
+            if not result['is_valid']:
+                # 從 parsed_refs 中找到對應的完整原文
+                full_original = parsed_refs[result['index'] - 1].get('original', result['original'])
+                with st.expander(f"❌ 第 {result['index']} 筆 - {full_original[:50]}...", expanded=True):
+                    st.markdown(f"**完整原文：**")
+                    st.code(full_original, language="text")
+                    st.markdown(f"**格式類型：** {result['format_type']}")
+                    st.markdown(f"**錯誤項目：**")
+                    for error in result['errors']:
+                        st.markdown(f"- {error}")
+        
+        st.info("💡 請修正上述錯誤後重新上傳檔案")
+        st.stop()  # 停止執行
+    else:
+        st.success(f"✅ 所有參考文獻格式檢查通過！")
+
     st.session_state.reference_list = parsed_refs
     
     st.info(get_text("parse_success", count=len(parsed_refs)))
