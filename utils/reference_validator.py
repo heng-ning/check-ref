@@ -313,14 +313,14 @@ def validate_required_fields(ref: dict, format_type: str) -> Tuple[bool, List[st
         authors = ref.get("authors") or ref.get("author")
 
     if not authors or (isinstance(authors, list) and len(authors) == 0):
-        errors.append("無法解析作者（必要比對條件）：可能為團體作者、專案名稱或格式非標準")
+        errors.append("作者資訊不足（可能因文獻未提供或系統解析限制，影響比對）")
 
     year = ref.get("year")
     if not year:
         # 你的 IEEE 原本有做「原文是否有年份」的容錯，我保留這個邏輯
         has_year_in_original = bool(re.search(r'(?<!\d)(19\d{2}|20[0-2]\d)(?!\d)|民國\s*\d{2,3}', original))
         if not has_year_in_original:
-            errors.append("缺少出版年份（必要比對條件）")
+            errors.append("年份資訊不足（可能因文獻未提供或系統解析限制，影響比對）")
 
     return (len(errors) == 0), errors
 
@@ -338,16 +338,16 @@ def validate_optional_fields(ref: dict, format_type: str) -> Tuple[bool, List[st
     # IEEE 你原本對 thesis 有特例；這裡也沿用（避免誤殺）
     is_thesis_format = bool(re.search(r'(Dissertation|Thesis|碩士|博士)\s*[-–—]\s*', original))
     if (not title) and (not is_thesis_format):
-        warnings.append("缺少文獻標題（非必要欄位，仍可比對，但解析資訊不完整）")
+        warnings.append("文獻標題未能解析（可能因格式非標準或解析限制，仍可比對，但解析資訊不完整）")
 
     # DOI / URL
-    if not ref.get("doi") and not ref.get("url"):
-        warnings.append("缺少 DOI/URL（非必要欄位）")
+    #if not ref.get("doi") and not ref.get("url"):
+    #    warnings.append("缺少 DOI/URL（非必要欄位）")
 
     # 出處（source / journal / conference / publisher 任一）
     has_venue = bool(ref.get("source") or ref.get("journal_name") or ref.get("conference_name") or ref.get("publisher"))
     if not has_venue:
-        warnings.append("缺少出處/來源資訊（期刊/會議/出版社等）（非必要欄位）")
+        warnings.append("出處／來源資訊（可能因格式非標準或解析限制，不影響比對）")
 
     return (len(warnings) == 0), warnings
 
