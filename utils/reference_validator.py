@@ -347,7 +347,7 @@ def validate_optional_fields(ref: dict, format_type: str) -> Tuple[bool, List[st
     # 出處（source / journal / conference / publisher 任一）
     has_venue = bool(ref.get("source") or ref.get("journal_name") or ref.get("conference_name") or ref.get("publisher"))
     if not has_venue:
-        warnings.append("出處／來源資訊（可能因格式非標準或解析限制，不影響比對）")
+        warnings.append("出處／來源資訊未能解析（可能因格式非標準或解析限制，不影響比對）")
 
     return (len(warnings) == 0), warnings
 

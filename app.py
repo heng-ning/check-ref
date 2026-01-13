@@ -103,9 +103,13 @@ elif uploaded_file:
     # 3. [新增] 自動執行交叉比對
     # 只要有解析出資料，且還沒做過比對（或者希望每次重新解析都跑），就自動執行
     if st.session_state.in_text_citations and st.session_state.reference_list:
-        if not st.session_state.get('comparison_done', False):
-            with st.spinner("正在自動進行交叉比對..."):
-                run_comparison()
+    # file_upload.py 會寫入 block_compare：True 表示作者/年份必要資訊不足
+        if st.session_state.get("block_compare", False):
+            st.info("⛔ 因參考文獻作者/年份為必要比對資訊且未能可靠解析，已暫停交叉比對（仍可查看逐筆解析結果）。")
+        else:
+            if not st.session_state.get('comparison_done', False):
+                with st.spinner("正在自動進行交叉比對..."):
+                    run_comparison()
 
 st.markdown("---")
 
