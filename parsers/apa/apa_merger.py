@@ -28,13 +28,9 @@ def merge_references_unified(paragraphs):
         para = normalize_text(para)
         if not para: continue
 
-        #category_keywords = r'(Conference|Journal|Article|Preprint|Paper|Book|Theses|Dissertation|Report|Proceedings|Symposium|Web|Online)'
-        #if re.match(r'^\d+\.\s*' + category_keywords, para, re.IGNORECASE):
-            #if len(para) < 50:
-               # continue
         if re.match(r'^\d+$', para) or re.match(r'^\[source', para, re.IGNORECASE): continue
         if re.match(r'^(Table|Figure|Fig\.)', para, re.IGNORECASE): continue
-        category_keywords = r'(中文|英文|一|二|三|四|五|期刊論文|學術研討會論文|網站文章|Conference|Journal|Article|Preprint|Paper|Book|Theses|Dissertation|Report|Proceedings|Symposium|Web|Online)'
+        category_keywords = r'(中文|英文|一|二|三|四|五|期刊論文|學術研討會論文|網站文章|紙本圖書|網路文獻|Conference|Journal|Article|Preprint|Paper|Book|Theses|Dissertation|Report|Proceedings|Symposium|Web|Online)'
         if re.match(r'^[\d\.\s、，,：:\[\]一二三四五]*' + category_keywords, para, re.IGNORECASE):
             if len(para) < 50:
                 if not re.search(r'[（(]\s*\d{4}', para): 
@@ -45,10 +41,52 @@ def merge_references_unified(paragraphs):
 
         # 2. 判斷是否為新文獻開始 (Priority High)
         is_new_start = False
-        
-        # A. 中文標準
-        if re.match(r'^[\u4e00-\u9fa5]+.*?[\(（]\d{4}[\)）]', para):
+
+        # 特殊判斷:「取自 URL (年月日)」後面接作者
+        # 例如: "...取自https://example.com (2023年06月06日) 張三、李四(2024)..."
+        if re.search(r'https?://[^\s。)）]+\s*[（(]\s*\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日\s*[)）]\s*$', current_ref):
+            # 如果當前行是中文作者開頭,視為新文獻
+            if re.match(r'^[\u4e00-\u9fa5]{2,}[、，(（]', para):
+                is_new_start = True
+
+        # 作者名字斷行的延續檢查
+        is_continuation = False
+        if (re.match(r'^[\u4e00-\u9fa5]{1,2}[、，]', para) and 
+            current_ref and re.search(r'[\u4e00-\u9fa5]{1,2}$', current_ref.strip()) and
+            not re.search(r'[。.]$', current_ref.strip())):
+            # 前一行以1-2個中文字結尾(非句號),當前行是單字+頓號開頭 → 強制延續
+            is_continuation = True
+            # 直接跳到執行動作,不做任何新文獻判斷
+        elif re.match(r'^[\u4e00-\u9fa5]+.*?[（(]\d{4}[)）]', para):
+            # A. 中文標準（含年份在同一行）
             is_new_start = True
+
+        # A2. 中文作者列表開頭(即使年份不在同一行)
+        elif re.match(r'^[\u4e00-\u9fa5]{2,4}[、，][\u4e00-\u9fa5]{2,4}', para):
+            # 【優先判斷】如果前一行以「單字中文」結尾(作者名字斷行),當前行是「單字+頓號」開頭 → 強制延續
+            if (re.match(r'^[\u4e00-\u9fa5]{1,2}[、，]', para) and 
+                current_ref and re.search(r'[\u4e00-\u9fa5]{1,2}$', current_ref.strip()) and
+                not re.search(r'[。.]$', current_ref.strip())):  # 前一行不是句號結尾
+                is_continuation = True  # 直接設為延續,跳過後續所有判斷
+            # 排除:書名號開頭
+            elif re.match(r'^[《〈「『\d]', para):
+                pass
+            # 如果當前行包含年份括號,肯定是新文獻
+            elif re.search(r'[（(]\d{4}[)）]', para):
+                is_new_start = True
+            # 如果前一筆已經完整(有句號結尾),當前是作者列表 → 新文獻
+            elif current_ref and re.search(r'[。.]$', current_ref.strip()):
+                is_new_start = True
+            # 如果前一筆看起來是完整的參考文獻 → 新文獻
+            elif current_ref and (
+                re.search(r'[。.][\u4e00-\u9fa5]{2,}[。.]?$', current_ref.strip()) or
+                re.search(r'《[^》]+》', current_ref) or
+                re.search(r'[，,]\s*\d+.*[。.]?$', current_ref)
+            ):
+                is_new_start = True
+            # 其他情況:不判定
+            else:
+                pass
             
         # B. 英文標準
         elif re.match(r'^[A-Z][^\d\(\)]+(\(|\,\s*)\d{4}', para) and not re.match(r'^\s*(&|and)\b', para, re.IGNORECASE):
@@ -63,19 +101,14 @@ def merge_references_unified(paragraphs):
             num_match = re.match(r'^(\d+)', para)
             num_val = int(num_match.group(1))
             
-            # 防呆條件 1: 數字 > 500 通常是文章編號
             if num_val > 500:
                 is_new_start = False
-            # 防呆條件 2: 數字後面緊接 DOI 或 URL
             elif re.search(r'^\d+\.\s*(https?://|doi:)', para, re.IGNORECASE):
                 is_new_start = False
-            # 防呆條件 3: 純粹只有數字+句號（如 "162."），可能是頁碼
-            #elif re.match(r'^\d{1,3}\.\s*$', para):
-             #   is_new_start = False
             else:
                 is_new_start = True
-        
-        # D. IEEE 括號編號 [1]
+
+        # E. IEEE 括號編號 [1]
         elif re.match(r'^\s*[\[【]\s*\d+\s*[】\]]', para):
             is_new_start = True
 
@@ -94,12 +127,36 @@ def merge_references_unified(paragraphs):
             # D. 大數字開頭的行 (如 104979.) 也視為延續
             elif re.match(r'^\d{4,}\.', para):
                 is_continuation = True
+            # E. 中文作者延續(前一行是作者列表,當前行也是作者但無年份)
+            elif current_ref and re.search(r'[\u4e00-\u9fa5]{2,4}[、，][\u4e00-\u9fa5]{2,4}', current_ref):
+                # 當前行是中文字開頭,且包含頓號/逗號(作者列表特徵)
+                if re.match(r'^[\u4e00-\u9fa5]', para) and re.search(r'[、，]', para):
+                    # 如果包含年份括號,不視為延續(是新文獻)
+                    if re.search(r'[（(]\d{4}[)）]', para):
+                        pass  # 不設為延續,讓它走新文獻判斷
+                    else:
+                        is_continuation = True
+            # F. 前一行以中文結尾但沒有句號(可能是斷行)
+            elif current_ref and re.search(r'[\u4e00-\u9fa5]$', current_ref.strip()):
+                # 當前行以中文開頭
+                if re.match(r'^[\u4e00-\u9fa5]', para):
+                    # 情況1:單字 + 頓號開頭(如「蓉、」)→ 肯定是延續
+                    if re.match(r'^[\u4e00-\u9fa5]{1,2}[、，]', para):
+                        # 但如果有年份括號,則不是延續
+                        if not re.search(r'[（(]\d{4}[)）]', para):
+                            is_continuation = True
+                    # 情況2:有頓號且前一行也有頓號(作者列表延續)
+                    elif re.search(r'[、，]', para) and re.search(r'[、，]', current_ref):
+                        # 如果有年份括號,則不是延續
+                        if not re.search(r'[（(]\d{4}[)）]', para):
+                            is_continuation = True
+
         if is_new_start and current_ref:
             # 如果暫存區只有 "數字." (例如 "1.")，代表上一行是被斷開的編號
             if re.match(r'^\d+\.\s*$', current_ref):
                 is_new_start = False   # 取消新文獻判定
                 is_continuation = True # 強制視為延續
-        # 4. 執行動作
+
         # 4. 執行動作
         if is_new_start:
             if current_ref: merged.append(current_ref)

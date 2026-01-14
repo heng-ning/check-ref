@@ -51,10 +51,10 @@ def check_references(in_text_citations, reference_list):
             # 如果包含 et al.，從 author 字段提取第一作者（不需要回退到原始文本）
             if re.search(r'et\s+al\.?|等人|等', author_str, re.IGNORECASE):
                 author_cleaned = re.sub(r'\s+et\s+al\.?.*$', '', author_str, flags=re.IGNORECASE)
-                author_cleaned = re.sub(r'\s+等人.*$', '', author_cleaned)
-                author_cleaned = re.sub(r'\s+等.*$', '', author_cleaned)
+                author_cleaned = re.sub(r'等人.*$', '', author_cleaned)  # 移除空格要求
+                author_cleaned = re.sub(r'\s*等(?![^\u4e00-\u9fff]).*$', '', author_cleaned)
                 author_cleaned = author_cleaned.strip()
-                # 清理多余空格并提取第一作者（处理可能的双作者情况）
+                # 清理多余空格并提取第一作者（处理可能的顿号分隔的多作者情况）
                 author_cleaned = re.sub(r'\s+', ' ', author_cleaned).strip()
                 first_author = re.split(r'\s+&\s+|\s+and\s+|、|與', author_cleaned)[0].strip()
                 return re.sub(r'\s+', ' ', first_author).strip()
@@ -112,10 +112,9 @@ def check_references(in_text_citations, reference_list):
             # 如果包含 et al.，先移除 et al. 部分
             if re.search(r'et\s+al\.?|等人|等', author_part, re.IGNORECASE):
                 author_part = re.sub(r'\s+et\s+al\.?.*$', '', author_part, flags=re.IGNORECASE)
-                author_part = re.sub(r'\s+等人.*$', '', author_part)
-                author_part = re.sub(r'\s+等.*$', '', author_part)
+                author_part = re.sub(r'\s*等人.*$', '', author_part)
+                author_part = re.sub(r'\s*等(?![^\u4e00-\u9fff]).*$', '', author_part)  # 只匹配「等」後面不是中文的情況
                 author_part = author_part.strip()
-                author_part = re.sub(r'\s+', ' ', author_part).strip()
             
             # 提取第一個作者（去除可能的連接詞：&, and, 與, 和）
             first_author = re.split(r'\s+&\s+|\s+and\s+|、|與', author_part)[0].strip()
@@ -141,9 +140,8 @@ def check_references(in_text_citations, reference_list):
             if re.search(r'et\s+al\.?|等人|等', text_before_paren, re.IGNORECASE):
                 # 移除 et al. 及之後的內容（注意：et 和 al 之間可能有多余空格）
                 author_part = re.sub(r'\s+et\s+al\.?.*$', '', text_before_paren, flags=re.IGNORECASE)
-                author_part = re.sub(r'\s+等人.*$', '', author_part)
-                author_part = re.sub(r'\s+等.*$', '', author_part)
-                author_part = author_part.strip()
+                author_part = re.sub(r'\s*等人.*$', '', author_part)
+                author_part = re.sub(r'\s*等(?![^\u4e00-\u9fff]).*$', '', author_part)  # 只匹配「等」後面不是中文的情況
             else:
                 author_part = text_before_paren
             
@@ -213,7 +211,7 @@ def check_references(in_text_citations, reference_list):
         author_str = author_str.lower()
         
         # 移除常見的綴詞和連接詞
-        for junk in ['et al.', 'et al', 'and', '&', ',', '與', '和', '及', '等人', '等', '.']:
+        for junk in ['et al.', 'et al', 'and', '&', ',', '與', '和', '及', '等人', '等', '.', '、']:
             author_str = author_str.replace(junk, ' ')
         
         # 再次清理多余空格（因为替换后可能产生多余空格）
@@ -282,18 +280,45 @@ def check_references(in_text_citations, reference_list):
             ref_map_by_number[ref_num] = i
         
         # 建立作者-年份索引（APA）
-        ref_author = normalize_author(ref.get('authors') or ref.get('author'))
+        ref_authors = ref.get('authors') or ref.get('author')
         ref_year = normalize_year(ref.get('year'))
         
-        if ref_author and ref_year:
-            key = (ref_author, ref_year)
+        # 【修改】同時建立「完整作者」和「第一作者」的索引
+        # 完整作者索引（用於精確匹配）
+        ref_author_full = normalize_author(ref_authors)
+        if ref_author_full and ref_year:
+            key = (ref_author_full, ref_year)
             ref_map_by_author_year[key] = i
         
+        # 【新增】第一作者索引（用於「等人」匹配）
+        if isinstance(ref_authors, list) and ref_authors:
+            first_author_raw = ref_authors[0]
+            
+            # 【修正】如果第一個元素包含頓號，表示作者被打包在一個字串裡，需要拆分
+            if isinstance(first_author_raw, str) and '、' in first_author_raw:
+                # 拆分作者字串，取第一個作者
+                first_author_raw = first_author_raw.split('、')[0].strip()
+            
+            ref_first_author = normalize_author(first_author_raw)
+        else:
+            # 字串格式，可能也包含多個作者
+            if isinstance(ref_authors, str) and '、' in ref_authors:
+                first_author_raw = ref_authors.split('、')[0].strip()
+                ref_first_author = normalize_author(first_author_raw)
+            else:
+                ref_first_author = normalize_author(ref_authors)
+
+        if ref_first_author and ref_year:
+            key_first = (ref_first_author, ref_year)
+            # 如果這個 key 還沒有被佔用，才加入（避免覆蓋完整作者索引）
+            if key_first not in ref_map_by_author_year:
+                ref_map_by_author_year[key_first] = i
+        
         # 建立作者索引（用於年份錯誤檢測）
-        if ref_author:
-            if ref_author not in ref_map_by_author:
-                ref_map_by_author[ref_author] = []
-            ref_map_by_author[ref_author].append({
+        if ref_author_full:
+            if ref_author_full not in ref_map_by_author:
+                ref_map_by_author[ref_author_full] = []
+            ref_map_by_author[ref_author_full].append({
                 'index': i,
                 'year': ref_year,
                 'original': ref.get('original', '')
@@ -338,29 +363,56 @@ def check_references(in_text_citations, reference_list):
             cit_year = normalize_year(cit.get('year'))
             
             if cit_author and cit_year:
-                # 精確匹配：作者 + 年份
-                key = (cit_author, cit_year)
-                if key in ref_map_by_author_year:
-                    ref_index = ref_map_by_author_year[key]
-                    
-                    matched_indices.add(ref_index)
-                    is_found = True
+                # 【新增】檢查內文引用是否包含「等人」
+                is_et_al_citation = False
+                cit_original = cit.get('original', '')
+                if re.search(r'等人|等|et\s+al\.?', cit_original, re.IGNORECASE):
+                    is_et_al_citation = True
                 
-                # 如果沒有精確匹配，檢查是否有作者匹配但年份不同的情況
-                if not is_found and cit_author in ref_map_by_author:
-                    for ref_info in ref_map_by_author[cit_author]:
-                        if ref_info['year'] != cit_year:
-                            # 發現年份不符
-                            potential_year_mismatch_index = ref_info['index']
-                            
-                            if potential_year_mismatch_index not in year_mismatch_map:
-                                year_mismatch_map[potential_year_mismatch_index] = []
-                            
-                            year_mismatch_map[potential_year_mismatch_index].append({
-                                'citation': cit.get('original', ''),
-                                'cited_year': cit_year,
-                                'correct_year': ref_info['year']
-                            })
+                # 【新增】如果是「等人」格式，只用第一作者 + 年份比對所有參考文獻
+                if is_et_al_citation:
+                    # 遍歷所有參考文獻，找到第一作者 + 年份匹配的
+                    for ref_idx, ref in enumerate(reference_list):
+                        ref_authors = ref.get('authors') or ref.get('author')
+                        ref_year = normalize_year(ref.get('year'))
+                        
+                        # 提取參考文獻的第一作者
+                        if isinstance(ref_authors, list) and ref_authors:
+                            ref_first_author = normalize_author(ref_authors[0])
+                        else:
+                            ref_first_author = normalize_author(ref_authors)
+                        
+                        # 比對：第一作者相同 + 年份相同
+                        if ref_first_author == cit_author and ref_year == cit_year:
+                            matched_indices.add(ref_idx)
+                            is_found = True
+                            break
+                
+                # 如果不是「等人」格式，或者「等人」格式沒找到匹配，則繼續原有的精確匹配邏輯
+                if not is_found:
+                    # 精確匹配：作者 + 年份
+                    key = (cit_author, cit_year)
+                    if key in ref_map_by_author_year:
+                        ref_index = ref_map_by_author_year[key]
+                        
+                        matched_indices.add(ref_index)
+                        is_found = True
+                    
+                    # 如果沒有精確匹配，檢查是否有作者匹配但年份不同的情況
+                    if not is_found and cit_author in ref_map_by_author:
+                        for ref_info in ref_map_by_author[cit_author]:
+                            if ref_info['year'] != cit_year:
+                                # 發現年份不符
+                                potential_year_mismatch_index = ref_info['index']
+                                
+                                if potential_year_mismatch_index not in year_mismatch_map:
+                                    year_mismatch_map[potential_year_mismatch_index] = []
+                                
+                                year_mismatch_map[potential_year_mismatch_index].append({
+                                    'citation': cit.get('original', ''),
+                                    'cited_year': cit_year,
+                                    'correct_year': ref_info['year']
+                                })
         
         # 如果完全找不到匹配，標記為遺漏
         if not is_found and potential_year_mismatch_index is None:

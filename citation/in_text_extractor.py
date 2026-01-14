@@ -19,7 +19,15 @@ def extract_in_text_citations(content_paragraphs, reference_list=None):
     Returns:
         citations: 內文引用列表
     """
-    full_text = " ".join(content_paragraphs)    
+    full_text = " ".join(content_paragraphs)
+
+    # 移除 PDF 斷行造成的殘留字 (在所有正則匹配之前)
+    # 例如: "究李約德(2004)" → "李約德(2004)", "式葉慧君(2002)" → "葉慧君(2002)"
+    full_text = re.sub(
+        r'([究式論文獻期刊書篇章節段表研指探討析驗證明調查訪談問題方法理模型])([\u4e00-\u9fa5]{2,4}\s*[（(]\s*\d{4})',
+        r'\2',  # 只保留第二組(姓名+年份)
+        full_text
+    )
     
     # 1. 中文姓名（處理姓氏與名字分離的情況）
     #    例如: "葉 乃嘉(2013)" → "葉乃嘉(2013)"
@@ -140,10 +148,13 @@ def extract_in_text_citations(content_paragraphs, reference_list=None):
     pattern_apa1 = re.compile(
         r'(?<![0-9])[（(]\s*'
         r'('  # group(1): 完整的作者部分
-            r'[\w\s\u4e00-\u9fff&、\-\.,]+?'  # 允許逗號、& 和 、
-            r'(?:\s+(?:et\s*al\.?|等人?|等))?'  # 可選的 et al.
+            # 作者部分不能包含 "p." 或 "pp." 等頁碼標記
+            # 使用負向前瞻確保不會匹配到頁碼
+            r'(?:(?!pp?\.?\s*\d)[\w\s\u4e00-\u9fff&、\-])+?'  # 不允許 p. 或 pp. 後接數字
+            r'(?:(?:\s+(?:et\s*al\.?)|(?:等人?|等)))?'  # 可選的 et al. 或等人
         r')'
         r'\s*[,，]\s*'
+        r'(?:pp?\.?\s*\d+(?:[-–—]\d+)?\s*[,，]\s*)?'  # 可選的頁碼在年份之前
         r'(\d{4}[a-z]?)'  # group(2): 年份
         r'(?:\s*[,，]?\s*pp?\.?\s*\d+(?:[-–—]\d+)?)?'  # 可選的頁碼：, p654 或 pp. 123-145
         r'\s*[）)]',
@@ -157,6 +168,16 @@ def extract_in_text_citations(content_paragraphs, reference_list=None):
         
         raw_text = match.group(0)
         raw_author_text = match.group(1).strip()  # 完整的作者文本
+        
+        # 移除作者文本中的頁碼部分
+        # 處理格式：
+        # - "蕭明瑜, p. 16" → "蕭明瑜"
+        # - "Smith, pp. 123-145" → "Smith"
+        # - "陳坤宏, 16" → "陳坤宏"（單獨的數字也可能是頁碼）
+        raw_author_text = re.sub(r',\s*pp?\.?\s*\d+(?:[-–—]\d+)?$', '', raw_author_text, flags=re.IGNORECASE)
+        raw_author_text = re.sub(r',\s*\d+\s*$', '', raw_author_text)  # 移除尾部的 ", 16" 格式
+        raw_author_text = raw_author_text.strip()
+        
         raw_year = match.group(2)[:4]
         
         # 檢查是否為純數字（避免誤匹配）
@@ -815,7 +836,7 @@ def _match_apa_citation_to_reference(raw_text, raw_year, ref_by_year, ref_by_aut
         
         # 檢查參考文獻原文中是否有 et al.
         ref_original = ref.get('original', '')
-        has_et_al_in_ref = bool(re.search(r'et\s*al\.?', ref_original, re.IGNORECASE))
+        has_et_al_in_ref = bool(re.search(r'et\s*al\.?|等人|等', ref_original, re.IGNORECASE))
 
         # 重新判斷作者數量（考慮 et al.）
         if has_et_al_in_ref and author_count == 1:
