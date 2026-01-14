@@ -615,6 +615,13 @@ def extract_in_text_citations(content_paragraphs, reference_list=None):
 
         if not extracted_numbers:
             continue
+        
+        # 檢查是否至少有一個編號在參考文獻中存在
+        if reference_list:
+            has_valid_ref = any(n in ref_by_number for n in extracted_numbers)
+            if not has_valid_ref:
+                # 所有編號都找不到 → 可能是數據，跳過
+                continue
 
         citation_id = f"{match.start()}-{match.end()}"
         if citation_id not in citation_ids:

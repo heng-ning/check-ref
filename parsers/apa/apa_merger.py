@@ -132,4 +132,14 @@ def merge_references_unified(paragraphs):
                 current_ref = para
                 
     if current_ref: merged.append(current_ref)
-    return merged
+    
+    # 修復 URL 斷行問題
+    # 例如: "https://example.com/path- abc123" → "https://example.com/path-abc123"
+    fixed_merged = []
+    for ref in merged:
+        # 移除 URL 中間的空格和換行（連字符後的空格）
+        ref = re.sub(r'(https?://[^\s]*?)-\s+([a-zA-Z0-9])', r'-\1\2', ref)
+        ref = re.sub(r'(https?://[^\s]*?)\s+([a-zA-Z0-9/_\-]+)', r'\1\2', ref)
+        fixed_merged.append(ref)
+    
+    return fixed_merged
