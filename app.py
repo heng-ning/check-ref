@@ -41,21 +41,6 @@ with st.sidebar:
     
     st.markdown("---")
 
-    # 2. 資料管理
-    st.header(get_text("data_manage"))
-    
-    st.subheader(get_text("current_status"))
-    st.metric(get_text("in_text_count"), len(st.session_state.in_text_citations))
-    st.metric(get_text("ref_count"), len(st.session_state.reference_list))
-    
-    st.markdown("---")
-    st.subheader(get_text("clear_data"))
-    if st.button(get_text("clear_btn"), type="secondary", use_container_width=True):
-        st.session_state.in_text_citations = []
-        st.session_state.reference_list = []
-        st.success(get_text("clear_success"))
-        st.rerun()
-
 # ==================== 主區域 ====================
 st.title(get_text("page_title"))
 
