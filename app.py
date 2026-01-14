@@ -111,8 +111,6 @@ elif uploaded_file:
                 with st.spinner("正在自動進行交叉比對..."):
                     run_comparison()
 
-st.markdown("---")
-
 # ==================== 交叉比對分析結果區 ====================
 # [修改] 這裡可以選擇是否還要顯示「手動比對按鈕」。
 # 如果您希望完全自動化，可以把 display_comparison_button() 拿掉，

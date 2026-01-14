@@ -102,18 +102,21 @@ def extract_in_text_citations(content_paragraphs, reference_list=None):
                 
             for idx, seg in enumerate(segments):
                 seg_match = re.match(
-                    r'([\w\s\u4e00-\u9fff&,、\-\.]+?(?:\s+(?:et\s*al\.?|等人?|等))?)\s*[,，]\s*(\d{4}[a-z]?)',
+                    r'([\w\s\u4e00-\u9fff&,、\-\.]+?(?:\s+(?:et\s*al\.?|等人?|等))?)\s*[,、]\s*(\d{4}[a-z]?)',
                     seg.strip()
                 )
                 if seg_match:
-                    raw_text = seg_match.group(0)
+                    raw_author_part = seg_match.group(1).strip()  # 提取作者部分
                     raw_year = seg_match.group(2)[:4]
                     
-                    if not seg_match.group(1).strip().isdigit() and is_valid_year(raw_year):
+                    if not raw_author_part.isdigit() and is_valid_year(raw_year):
                         citation_id = f"{match.start()}-multi-{idx}"
                         if citation_id not in citation_ids:
-                            # 為子引用片段添加括號，使其符合 _match_apa_citation_to_reference 的匹配格式
-                            seg_with_parens = f"({seg.strip()})"
+                            # 構造完整的引用格式，確保作者部分清晰
+                            # 移除多餘空格（處理 "Angelini  et al." 這種情況）
+                            raw_author_clean = re.sub(r'\s+', ' ', raw_author_part).strip()
+                            seg_with_parens = f"({raw_author_clean}, {raw_year})"  # 改進格式
+                            
                             matched_ref = _match_apa_citation_to_reference(
                                 seg_with_parens, raw_year, ref_by_year, ref_by_author_year, reference_list
                             )
@@ -121,10 +124,10 @@ def extract_in_text_citations(content_paragraphs, reference_list=None):
                             normalized = normalize_citation_for_matching(seg.strip())
                             
                             citations.append({
-                                'author': matched_ref['author'] if matched_ref else seg_match.group(1).strip(),
+                                'author': matched_ref['author'] if matched_ref else raw_author_clean,  # 使用清理後的作者
                                 'co_author': None,
                                 'year': matched_ref['year'] if matched_ref else raw_year,
-                                'original': f"({seg.strip()})",  # 只記錄這個子引用，例如 "(Garcia et al., 2023)"
+                                'original': f"({seg.strip()})",
                                 'normalized': normalized,
                                 'position': match.start(),
                                 'type': 'APA-parenthetical-multi',
@@ -132,8 +135,6 @@ def extract_in_text_citations(content_paragraphs, reference_list=None):
                                 'matched_ref_index': matched_ref['index'] if matched_ref else None
                             })
                             citation_ids.add(citation_id)
-            
-            citation_ids.add(f"{match.start()}-{match.end()}")
     
     # --- 2. APA 單一括號式: (作者, 年份) 或 (作者 & 作者, 年份) 或 (作者、作者、作者, 年份) ---
     pattern_apa1 = re.compile(
@@ -144,6 +145,7 @@ def extract_in_text_citations(content_paragraphs, reference_list=None):
         r')'
         r'\s*[,，]\s*'
         r'(\d{4}[a-z]?)'  # group(2): 年份
+        r'(?:\s*[,，]?\s*pp?\.?\s*\d+(?:[-–—]\d+)?)?'  # 可選的頁碼：, p654 或 pp. 123-145
         r'\s*[）)]',
         re.UNICODE | re.IGNORECASE
     )
@@ -230,8 +232,8 @@ def extract_in_text_citations(content_paragraphs, reference_list=None):
         r'('  # group(1): 作者部分
             # 中文作者（2-4個中文字 + 可選的等/等人）
             r'(?:[\u4e00-\u9fff]{2,4}(?:等人?|等)?)|'
-            # 英文作者/機構（1-5個英文單詞 + 可選的 et al. 或中文「等」）
-            r'(?:[A-Za-z]+(?:\s+[A-Za-z]+){0,4}(?:\s+(?:et\s*al\.?|等人?|等))?)'
+            # 英文作者/機構（支持連字符、撇號，以及逗號分隔的 et al.）
+            r'(?:[A-Za-z\-\']+(?:\s+[A-Za-z\-\']+){0,4}(?:[\s,]+(?:et\s*al\.?|等人?|等))?)'
         r')'
         # 匹配「等人」之後可能出現的連接詞（則表示、指出、發現等）
         r'(?:則表示|指出|發現|認為|提出|表示|指明|顯示|說明|強調|建議)?'
@@ -241,7 +243,7 @@ def extract_in_text_citations(content_paragraphs, reference_list=None):
             r'(?:\s*(?:與|和|&|and)\s*'
                 r'(?:'
                     r'(?:[\u4e00-\u9fff]{2,4})|'  # 中文第二作者
-                    r'(?:[A-Za-z]+(?:\s+[A-Za-z]+){0,4})'  # 英文第二作者
+                    r'(?:[A-Za-z\-\']+(?:\s+[A-Za-z\-\']+){0,4})'  # 英文第二作者
                 r')'
             r')|'
             # 三作者:、第二作者、第三作者（中文頓號連接）
@@ -249,6 +251,7 @@ def extract_in_text_citations(content_paragraphs, reference_list=None):
         r')?'
         r'\s*[（(]\s*'
         r'(\d{4}[a-z]?)'  # group(2): 年份
+        r'(?:\s*[,，]?\s*pp?\.?\s*\d+(?:[-–—]\d+)?)?'  # 可選的頁碼
         r'\s*[）)]',
         re.UNICODE | re.IGNORECASE
     )
@@ -262,6 +265,25 @@ def extract_in_text_citations(content_paragraphs, reference_list=None):
         
         if full_match_text.isdigit():
             continue
+        
+        # 過濾非作者名的中文詞彙
+        non_author_keywords = [
+            '檢定', '分析', '模型', '理論', '方法', '測試', '迴歸', '相關', 
+            '整合', '驗證', '評估', '估計', '預測', '探討', '統計', '計算',
+            '因素', '效應', '變數', '指標', '量表', '問卷', '研究', '調查'
+        ]
+        
+        if any('\u4e00' <= c <= '\u9fff' for c in full_match_text):
+            if any(keyword in full_match_text for keyword in non_author_keywords):
+                continue
+        
+        # 如果同時包含英文和中文，優先提取英文部分
+        if re.search(r'[A-Za-z]', full_match_text) and re.search(r'[\u4e00-\u9fff]', full_match_text):
+            english_part = re.search(r'([A-Za-z\-\']+(?:\s+[A-Za-z\-\']+)*)', full_match_text)
+            if english_part:
+                full_match_text = english_part.group(1).strip()
+                # 同時更新 raw_text 以便後續匹配
+                raw_text = f"{full_match_text} ({raw_year})"
         
         if is_valid_year(raw_year):
             citation_id = f"{match.start()}-{match.end()}"
@@ -280,6 +302,37 @@ def extract_in_text_citations(content_paragraphs, reference_list=None):
                     # 直接使用 parsed_authors 獲取姓氏
                     original_clean = match.group(0)
                     matched_ref_data = reference_list[matched_ref['index']]
+
+                    # 檢查是否需要補全作者名
+                    ref_full_author = matched_ref_data.get('authors')
+                    if ref_full_author:
+                        if isinstance(ref_full_author, list) and ref_full_author:
+                            ref_first_author_full = ref_full_author[0]
+                        else:
+                            ref_first_author_full = str(ref_full_author)
+                        
+                        citation_author_part = re.search(r'^(.*?)\s*[（(]\s*\d{4}', original_clean)
+                        if citation_author_part:
+                            citation_author = citation_author_part.group(1).strip()
+                            
+                            # 判斷是中文還是英文，使用不同的比對邏輯
+                            is_substring = False
+                            if any('\u4e00' <= c <= '\u9fff' for c in citation_author):
+                                # 中文：直接檢查子字串
+                                is_substring = (len(citation_author) >= 3 and 
+                                            citation_author in ref_first_author_full and
+                                            citation_author != ref_first_author_full)
+                            else:
+                                # 英文：不區分大小寫
+                                is_substring = (len(citation_author) >= 3 and 
+                                            citation_author.lower() in ref_first_author_full.lower() and
+                                            citation_author.lower() != ref_first_author_full.lower())
+
+                            if is_substring:
+                                year_part = re.search(r'[（(]\s*\d{4}[a-z]?(?:\s*[,，]?\s*pp?\.?\s*\d+(?:[-–—]\d+)?)?\s*[）)]', original_clean)
+                                if year_part:
+                                    original_clean = f"{ref_first_author_full} {year_part.group(0)}"
+
                     parsed_authors = matched_ref_data.get('parsed_authors')
                     
                     if parsed_authors and isinstance(parsed_authors, list):
@@ -621,7 +674,7 @@ def _normalize_author_name(author):
         # 英文作者：取第一個單詞
         parts = author_str.split()
         if parts:
-            core = "".join(filter(str.isalnum, parts[0]))
+            core = "".join(filter(lambda c: c.isalnum() or c in '-\'', parts[0]))
         else:
             core = ""
     
@@ -753,12 +806,25 @@ def _match_apa_citation_to_reference(raw_text, raw_year, ref_by_year, ref_by_aut
                     author_count = len(re.split(r'[,;]|\sand\s|\s&\s|、|與', author_str))
                     break
         
+        # 檢查參考文獻原文中是否有 et al.
+        ref_original = ref.get('original', '')
+        has_et_al_in_ref = bool(re.search(r'et\s*al\.?', ref_original, re.IGNORECASE))
+
+        # 重新判斷作者數量（考慮 et al.）
+        if has_et_al_in_ref and author_count == 1:
+            author_count = 2  # 視為多作者（至少2位）
+
         # ===== 根據作者數量檢查是否匹配 =====
         is_count_match = False
 
         if citation_type == 'et_al':
-            # 內文是 "et al." 格式 → reference 應該有 3+ 位作者，但也接受 2 位作者（可能是內文引用錯誤）
-            is_count_match = (author_count >= 2)
+            # 內文是 "et al." 格式
+            # 如果參考文獻原文也有 "et al."，則無論 authors 列表有幾位，都視為匹配
+            # 如果參考文獻沒有 "et al."，則要求至少 2 位作者
+            if has_et_al_in_ref:
+                is_count_match = True  # 參考文獻也用 et al.，直接匹配
+            else:
+                is_count_match = (author_count >= 2)  # 參考文獻沒用 et al.，要求至少 2 位
         elif citation_type == 'three_authors':
             # 內文是三作者格式 → reference 必須正好 3 位作者
             is_count_match = (author_count == 3)
@@ -779,46 +845,103 @@ def _match_apa_citation_to_reference(raw_text, raw_year, ref_by_year, ref_by_aut
         first_author = _get_first_author_str(authors)
         is_author_match = False
         match_score = 0
-        
+
+        # 檢查參考文獻原文中是否有 et al.
+        # 如果有，即使 authors 只有 1 位，也視為多作者文獻
+        ref_original = ref.get('original', '')
+        has_et_al_in_ref = bool(re.search(r'et\s*al\.?', ref_original, re.IGNORECASE))
+
+        # 重新判斷作者數量（考慮 et al.）
+        if has_et_al_in_ref and author_count == 1:
+            author_count = 2  # 視為多作者（至少2位）
+
+        is_count_match = False
+
         # --- 先檢查第一作者 ---
         if first_author:
-            # 標準化作者名
-            author_norm = _normalize_author_name(first_author)
-            
-            # 方法1：標準化後的作者名是否出現在原始引用文本中
-            if author_norm and author_norm in raw_text_lower:
-                is_author_match = True
-                match_score = len(author_norm)
-            
-            # 方法2：提取姓氏部分（支援中英文）
+            # 如果 et al. 精確匹配失敗，或不是 et al. 格式，繼續其他匹配方法
             if not is_author_match:
-                if any('\u4e00' <= char <= '\u9fff' for char in first_author):
-                    # 中文姓名：取第一個字作為姓
-                    surname = first_author[0] if first_author else ''
-                    
-                    # 檢查原文是否包含完整名字（例如：原文 "志富" vs 參考文獻 "鄭志富"）
-                    if len(first_author) >= 2:
-                        # 提取名字部分（去掉姓氏）
-                        given_name = first_author[1:] if len(first_author) > 1 else ''
-                        # 檢查名字是否在原文中
-                        if given_name and given_name in raw_text_lower:
-                            is_author_match = True
-                            match_score = len(given_name)
-                else:
-                    # 英文姓名：取姓氏
-                    parts = first_author.split(',')
-                    if len(parts) >= 1:
-                        surname = parts[0].strip().lower()
-                    else:
-                        words = first_author.split()
-                        surname = words[-1].lower() if words else ''
+                # 標準化作者名
+                author_norm = _normalize_author_name(first_author)
                 
-                # 檢查姓氏是否出現在原始引用文本中
-                if not is_author_match and surname and surname in raw_text_lower:
-                    surname_pattern = r'\b' + re.escape(surname) + r'\b'
-                    if re.search(surname_pattern, raw_text_lower, re.IGNORECASE):
+                # 方法1:標準化後的作者名是否出現在原始引用文本中
+                if author_norm:
+                    # 移除 et al. 等干擾詞後再比對
+                    citation_text_clean = re.sub(r'\s*et\s*al\.?|\s*等人', '', raw_text_lower)
+                    if author_norm in citation_text_clean:
                         is_author_match = True
-                        match_score = len(surname)
+                        match_score = len(author_norm)
+                        
+                        # 如果是 et al. 格式且精確匹配第一作者姓氏,給予更高分數
+                        if citation_type == 'et_al':
+                            match_score += 1000
+                
+                # 方法1.5：反向匹配
+                if not is_author_match:
+                    citation_author_match = re.search(r'([A-Za-z\s\-\']+)\s*[（(]\s*\d{4}', raw_text_lower)
+                    if citation_author_match:
+                        citation_author = citation_author_match.group(1).strip()
+                        citation_author = re.sub(r'^(the|a|an)\s+', '', citation_author, flags=re.IGNORECASE)
+                        
+                        if len(citation_author) >= 3 and citation_author in first_author.lower():
+                            is_author_match = True
+                            match_score = len(citation_author)
+                
+                # 方法2：提取姓氏部分（支援中英文）
+                if not is_author_match:
+                    if any('\u4e00' <= char <= '\u9fff' for char in first_author):
+                        # 中文姓名處理
+                        surname = first_author[0] if first_author else ''
+                        
+                        if len(first_author) >= 2:
+                            given_name = first_author[1:] if len(first_author) > 1 else ''
+                            if given_name and given_name in raw_text_lower:
+                                is_author_match = True
+                                match_score = len(given_name)
+
+                        # 中文部分匹配
+                        if not is_author_match:
+                            citation_zh_match = re.search(r'([\u4e00-\u9fff]{2,})\s*[（(]\s*\d{4}', raw_text_lower)
+                            if citation_zh_match:
+                                citation_zh_author = citation_zh_match.group(1)
+                                if len(citation_zh_author) >= 3 and citation_zh_author in first_author:
+                                    is_author_match = True
+                                    match_score = len(citation_zh_author)
+                    else:
+                        # 英文姓名：取姓氏
+                        parts = first_author.split(',')
+                        if len(parts) >= 1:
+                            surname = parts[0].strip().lower()
+                        else:
+                            words = first_author.split()
+                            surname = words[-1].lower() if words else ''
+
+                        # 檢查姓氏是否出現在原始引用文本中
+                        if not is_author_match and surname and surname in raw_text_lower:
+                            surname_escaped = re.escape(surname)
+                            surname_pattern = r'(?<![A-Za-z])' + surname_escaped + r'(?![A-Za-z])'
+                            if re.search(surname_pattern, raw_text_lower, re.IGNORECASE):
+                                is_author_match = True
+                                match_score = len(surname)
+                                
+                                # 如果是 et al. 格式,額外加分
+                                if citation_type == 'et_al':
+                                    match_score += 500
+
+                    # 檢查姓氏是否出現在原始引用文本中
+                    if not is_author_match and surname and surname in raw_text_lower:
+                        surname_escaped = re.escape(surname)
+                        surname_pattern = r'(?<![A-Za-z])' + surname_escaped + r'(?![A-Za-z])'
+                        if re.search(surname_pattern, raw_text_lower, re.IGNORECASE):
+                            is_author_match = True
+                            match_score = len(surname)
+                            
+                            # 精確匹配加分
+                            citation_first_word_match = re.search(r'([A-Za-z\-\']+)', raw_text_lower)
+                            if citation_first_word_match:
+                                first_word = citation_first_word_match.group(1).strip()
+                                if first_word == surname:
+                                    match_score += 1000
         
         # --- 如果第一作者不匹配，檢查第二作者 ---
         if not is_author_match and author_count >= 2:
@@ -857,7 +980,8 @@ def _match_apa_citation_to_reference(raw_text, raw_year, ref_by_year, ref_by_aut
                         
                         # 檢查姓氏是否出現在原始引用文本中
                         if surname and surname in raw_text_lower:
-                            surname_pattern = r'\b' + re.escape(surname) + r'\b'
+                            surname_escaped = re.escape(surname)
+                            surname_pattern = r'(?<![A-Za-z])' + surname_escaped + r'(?![A-Za-z])'
                             if re.search(surname_pattern, raw_text_lower, re.IGNORECASE):
                                 is_author_match = True
                                 match_score = len(surname)
