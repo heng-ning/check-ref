@@ -1,110 +1,9 @@
 """
 參考文獻格式驗證模組
-檢查 IEEE 和 APA 格式的參考文獻是否符合基本格式標準
+檢查 APA 格式的參考文獻是否符合基本格式標準
 """
 import re
 from typing import Dict, List, Tuple
-
-
-def validate_ieee_format(ref: dict, index: int) -> Tuple[bool, List[str]]:
-    """
-    驗證 IEEE 格式參考文獻的基本格式要求
-    
-    Args:
-        ref: 參考文獻字典
-        index: 參考文獻索引（用於錯誤訊息）
-    
-    Returns:
-        (is_valid, error_messages): 是否有效及錯誤訊息列表
-    """
-    errors = []
-    original = ref.get('original', '')
-    
-    # 1. 必須有編號
-    if not ref.get('ref_number'):
-        errors.append(f"缺少編號（應以 [n] 或 【n】 開頭）")
-    
-    # 2. 必須有作者
-    authors = ref.get('authors') or ref.get('parsed_authors')
-    if not authors:
-        errors.append(f"無法解析作者（必要比對條件）：可能為團體作者、專案名稱或格式非標準")
-    elif isinstance(authors, list) and len(authors) == 0:
-        errors.append(f"作者列表為空")
-    
-    # 3. 必須有標題
-    title = ref.get('title')
-    original = ref.get('original', '')
-
-    # 特殊情況：學位論文可能用 "Dissertation - 標題" 格式，解析器可能無法提取
-    # 如果原文包含 "Dissertation"/"Thesis" 等關鍵字，且有破折號，視為有標題
-    is_thesis_format = bool(re.search(r'(Dissertation|Thesis|碩士|博士)\s*[-–—]\s*', original))
-
-    if not title and not is_thesis_format:
-        errors.append(f"缺少文獻標題")
-    
-    # 4. 必須有年份
-    year = ref.get('year')
-    original = ref.get('original', '')
-
-    if not year:
-        # 檢查原文是否包含民國年份（民國 XXX 年）或其他年份格式
-        has_minguo_year = bool(re.search(r'民國\s*\d{2,3}\s*年', original))
-        has_year_in_original = bool(re.search(r'(19\d{2}|20[0-2]\d|民國\s*\d{2,3})', original))
-        
-        if not has_year_in_original:
-            errors.append(f"缺少出版年份")
-    else:
-        # 驗證年份格式（1900-2026 或民國年）
-        year_str = str(year)
-        if not re.search(r'(19\d{2}|20[0-2]\d|\d{2,3})', year_str):
-            errors.append(f"年份格式不正確：{year}")
-    
-    # 5. 檢查基本格式結構（作者名字格式）
-    if isinstance(authors, list) and authors:
-        # IEEE 格式應該是 "First Last" 或有 parsed_authors
-        first_author = str(authors[0]) if authors else ""
-        # 如果不是英文作者（中文等），跳過格式檢查
-        if first_author and re.search(r'[a-zA-Z]', first_author):
-            # 檢查是否有逗號分隔（IEEE 不應該用 "Last, F." 格式）
-            if ',' in first_author and not ref.get('parsed_authors'):
-                errors.append(f"作者格式可能不符合 IEEE 標準（應為 'First Last' 而非 'Last, F.'）")
-    
-    # 6. 期刊論文應有卷期或文章編號或 DOI (允許 Early Access、預印本和純電子期刊)
-    if ref.get('journal_name') or ref.get('source'):
-        # 檢查是否為中文參考文獻（通常包含中文標點或「卷」「期」「頁」等字）
-        original = ref.get('original', '')
-        is_chinese = bool(re.search(r'[\u4e00-\u9fff]', original))
-        
-        # 中文參考文獻跳過格式檢查（因為解析器可能無法正確提取所有欄位）
-        if is_chinese:
-            pass  # 不檢查中文期刊論文的卷期頁碼
-        else:
-            has_volume = ref.get('volume')
-            has_issue = ref.get('issue')
-            has_article_number = ref.get('article_number')
-            has_pages = ref.get('pages')
-            has_doi = ref.get('doi')
-            has_url = ref.get('url')  # 新增：檢查網址
-            is_early_access = 'early access' in original.lower()
-            
-            # 檢查是否為預印本
-            source = (ref.get('source') or ref.get('journal_name') or '').lower()
-            is_preprint = 'arxiv' in source or 'preprint' in source or 'biorxiv' in source or 'medrxiv' in source
-            
-            # 允許以下任一情況：
-            # - 有卷期/頁碼（傳統格式）
-            # - 有文章編號（純電子期刊）
-            # - 有 DOI 且標註 Early Access
-            # - 預印本（arXiv 等）
-            # - 有網址（學位論文、技術報告等）
-            if not (has_volume or has_article_number or has_pages or (has_doi and is_early_access) or is_preprint or has_url):
-                if has_doi and not is_early_access:
-                    errors.append(f"期刊論文有 DOI 但缺少卷期/頁碼/文章編號，如為預刊請標註 'early access'")
-                else:
-                    errors.append(f"期刊論文缺少卷期、文章編號、頁碼、DOI 或網址資訊")
-    
-    return len(errors) == 0, errors
-
 
 def validate_apa_format(ref: dict, index: int) -> Tuple[bool, List[str]]:
     """
@@ -240,9 +139,7 @@ def validate_reference_list(reference_list: List[dict], format_type: str = 'auto
     
     for i, ref in enumerate(reference_list, 1):
         # 根據格式類型選擇驗證函數
-        if format_type == 'IEEE':
-            is_valid, errors = validate_ieee_format(ref, i)
-        else:  # APA
+        if format_type == 'APA':
             is_valid, errors = validate_apa_format(ref, i)
         
         # 記錄驗證結果
@@ -305,22 +202,18 @@ def validate_required_fields(ref: dict, format_type: str) -> Tuple[bool, List[st
     """
     errors = []
     original = ref.get("original", "")
+    if format_type == "APA":
+      # authors 欄位在 APA 可能不同
+      authors = ref.get("authors") or ref.get("author")
 
-    # authors 欄位在 IEEE/APA 可能不同
-    if format_type == "IEEE":
-        authors = ref.get("authors") or ref.get("parsed_authors")
-    else:
-        authors = ref.get("authors") or ref.get("author")
+      if not authors or (isinstance(authors, list) and len(authors) == 0):
+          errors.append("作者資訊不足（可能因文獻未提供或系統解析限制，影響比對）")
 
-    if not authors or (isinstance(authors, list) and len(authors) == 0):
-        errors.append("作者資訊不足（可能因文獻未提供或系統解析限制，影響比對）")
-
-    year = ref.get("year")
-    if not year:
-        # 你的 IEEE 原本有做「原文是否有年份」的容錯，我保留這個邏輯
-        has_year_in_original = bool(re.search(r'(?<!\d)(19\d{2}|20[0-2]\d)(?!\d)|民國\s*\d{2,3}', original))
-        if not has_year_in_original:
-            errors.append("年份資訊不足（可能因文獻未提供或系統解析限制，影響比對）")
+      year = ref.get("year")
+      if not year:
+          has_year_in_original = bool(re.search(r'(?<!\d)(19\d{2}|20[0-2]\d)(?!\d)|民國\s*\d{2,3}', original))
+          if not has_year_in_original:
+              errors.append("年份資訊不足（可能因文獻未提供或系統解析限制，影響比對）")
 
     return (len(errors) == 0), errors
 
