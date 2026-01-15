@@ -1,3 +1,4 @@
+#file_upload.py
 import streamlit as st
 import re
 from utils.file_reader import (
@@ -158,22 +159,21 @@ def display_reference_parsing(ref_paras):
     # ===== 頁首總結提示（新增：列出是哪幾筆 + 可展開細節）=====
     if not critical_ok:
         st.error(
-            f"⛔ 有 {len(critical_results)} 筆參考文獻的必要比對資訊，系統未能可靠取得；"
-            f"將暫停交叉比對，但仍會顯示所有文獻的欄位解析結果。"
+            get_text("ref_critical_error_msg", count=len(critical_results))
         )
-        st.info("💡 建議修正上述條目後重新上傳，以提升比對準確性。")
+        st.info(get_text("ref_fix_suggestion"))
 
         # ✅ 新增：列出筆號
         critical_idxs = [r["index"] for r in critical_results]
-        st.markdown("**⛔ 必要條件問題筆號：** " + "、".join(map(str, critical_idxs)))
+        st.markdown(get_text("ref_critical_label") + " " + "、".join(map(str, critical_idxs)))
 
         # ✅ 新增：展開查看每筆的原文與錯誤原因
-        with st.expander("查看必要條件問題明細", expanded=False):
+        with st.expander(get_text("ref_critical_expander"), expanded=False):
             for r in critical_results:
                 idx = r["index"]
                 full_original = parsed_refs[idx - 1].get("original", "")
 
-                st.markdown(f"### ⛔ 第 {idx} 筆（{r.get('format_type', format_type)}）")
+                st.markdown(get_text("ref_critical_title", idx=idx, format=r.get('format_type', format_type)))
                 st.code(full_original, language="text")
                 for msg in r.get("errors", []):
                     st.error(msg)
@@ -181,27 +181,28 @@ def display_reference_parsing(ref_paras):
 
     if warning_results:
         st.warning(
-            f"⚠️ 有 {len(warning_results)} 筆參考文獻的標題/出處等資訊未能可靠解析（不影響交叉比對）。"
+            get_text("ref_warning_msg", count=len(warning_results))
         )
 
         # ✅ 新增：列出筆號
         warning_idxs = [w["index"] for w in warning_results]
-        st.markdown("**⚠️ 非必要欄位提醒筆號：** " + "、".join(map(str, warning_idxs)))
+        st.markdown(get_text("ref_warning_label") + " " + "、".join(map(str, warning_idxs)))
 
         # ✅ 新增：展開查看每筆的原文與警告原因
-        with st.expander("查看非必要欄位提醒明細（標題/出處，不影響比對）", expanded=False):
+        with st.expander(get_text("ref_warning_expander"), expanded=False):
             for w in warning_results:
                 idx = w["index"]
                 full_original = parsed_refs[idx - 1].get("original", "")
 
-                st.markdown(f"### ⚠️ 第 {idx} 筆（{w.get('format_type', format_type)}）")
+                st.markdown(get_text("ref_warning_title", idx=idx, format=w.get('format_type', format_type)))
                 st.code(full_original, language="text")
                 for msg in w.get("warnings", []):
                     st.warning(msg)
                 st.markdown("---")
 
     elif critical_ok:
-        st.success("✅ 參考文獻必要條件通過，且欄位解析完整度良好。")
+        st.success(get_text("ref_parse_success_msg"))
+    
     st.markdown("---")
     # ===== 儲存格式類型到 session，供後續顯示使用 =====
     st.session_state["format_type"] = format_type

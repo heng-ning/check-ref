@@ -4,7 +4,7 @@
 """
 import re
 from typing import Dict, List, Tuple
-
+from utils.i18n import get_text
 def validate_apa_format(ref: dict, index: int) -> Tuple[bool, List[str]]:
     """
     驗證 APA 格式參考文獻的基本格式要求
@@ -23,23 +23,23 @@ def validate_apa_format(ref: dict, index: int) -> Tuple[bool, List[str]]:
     # 1. 必須有作者
     authors = ref.get('authors') or ref.get('author')
     if not authors:
-        errors.append(f"無法解析作者（必要比對條件）：可能為團體作者、專案名稱或格式非標準")
+        errors.append(get_text("err_author_unparseable"))
     elif isinstance(authors, list) and len(authors) == 0:
-        errors.append(f"作者列表為空")
+        errors.append(get_text("err_author_empty"))
     
     # 2. 必須有年份
     year = ref.get('year')
     if not year:
-        errors.append(f"缺少出版年份")
+        errors.append(get_text("err_year_missing"))
     else:
         # 驗證年份格式
         year_str = str(year)
         if not re.search(r'(19\d{2}|20[0-2]\d)', year_str):
-            errors.append(f"年份格式不正確：{year}")
+            errors.append(get_text("err_year_format", year=year))
     
     # 3. 必須有標題
     if not ref.get('title'):
-        errors.append(f"缺少文獻標題")
+        errors.append(get_text("err_title_missing"))
     
     # 4. 檢查作者格式（英文 APA）
     # if lang == 'EN' and isinstance(authors, list) and authors:
@@ -101,11 +101,11 @@ def validate_apa_format(ref: dict, index: int) -> Tuple[bool, List[str]]:
             
             # 中文參考文獻、書籍、或明顯有期刊特徵但解析失敗，跳過檢查
             if not is_chinese and not is_book_chapter and not is_preprint and not likely_has_journal and not likely_book:
-                errors.append(f"缺少期刊名稱或出版資訊")
+                errors.append(get_text("err_journal_info_missing"))
     
     # 6. 檢查不應該有編號（APA 不使用編號）
     if ref.get('ref_number'):
-        errors.append(f"APA 格式不應包含編號 [{ref.get('ref_number')}]")
+        errors.append(get_text("err_apa_numbered", number=ref.get('ref_number')))
     
     return len(errors) == 0, errors
 
@@ -209,12 +209,11 @@ def validate_required_fields(ref: dict, format_type: str) -> Tuple[bool, List[st
         matches = list(re.finditer(author_year_pattern, original))
         
         if len(matches) >= 2:
-            errors.append("作者或年份資訊不足, 可能因文獻未提供, 系統解析限制或年份非西元年格式（目前僅支援西元年），影響比對")
-            return (False, errors)
+            errors.append(get_text("err_author_year_missing"))
         
         # 模式2：檢查是否有「句號 + 大寫字母 + 逗號」（典型的新作者開頭）
         if re.search(r'\.\s+[A-Z][a-z]+,\s*[A-Z]\.', original):
-            errors.append("作者或年份資訊不足, 可能因文獻未提供, 系統解析限制或年份非西元年格式（目前僅支援西元年），影響比對")
+            errors.append(get_text("err_author_year_missing"))
             return (False, errors)
         
         # authors 欄位檢查
@@ -235,7 +234,7 @@ def validate_required_fields(ref: dict, format_type: str) -> Tuple[bool, List[st
         
         # 只要有任一錯誤，就回報統一訊息
         if has_author_error or has_year_error:
-            errors.append("作者或年份資訊不足, 可能因文獻未提供, 系統解析限制或年份非西元年格式（目前僅支援西元年），影響比對")
+            errors.append(get_text("err_author_year_missing"))
         
         # ========== 結尾完整性檢查 ==========
         original_stripped = original.strip()
@@ -255,7 +254,7 @@ def validate_required_fields(ref: dict, format_type: str) -> Tuple[bool, List[st
             ends_with_word = re.search(r'[A-Za-z]{2,}$', original_stripped)
             
             if ends_with_word:
-                errors.append("參考文獻不完整，結尾異常，可能因換頁斷行導致內容遺失，影響比對")
+                errors.append(get_text("err_incomplete_ending"))
 
     return (len(errors) == 0), errors
 
@@ -272,7 +271,7 @@ def validate_optional_fields(ref: dict, format_type: str) -> Tuple[bool, List[st
     # IEEE 你原本對 thesis 有特例；這裡也沿用（避免誤殺）
     is_thesis_format = bool(re.search(r'(Dissertation|Thesis|碩士|博士)\s*[-–—]\s*', original))
     if (not title) and (not is_thesis_format):
-        warnings.append("文獻標題未能解析（可能因格式非標準或解析限制，仍可比對，但解析資訊不完整）")
+        warnings.append(get_text("warn_title_missing"))
 
     # DOI / URL
     #if not ref.get("doi") and not ref.get("url"):
@@ -281,8 +280,7 @@ def validate_optional_fields(ref: dict, format_type: str) -> Tuple[bool, List[st
     # 出處（source / journal / conference / publisher 任一）
     has_venue = bool(ref.get("source") or ref.get("journal_name") or ref.get("conference_name") or ref.get("publisher"))
     if not has_venue:
-        warnings.append("出處／來源資訊未能解析（可能因格式非標準或解析限制，不影響比對）")
-
+        warnings.append(get_text("warn_source_missing"))
     return (len(warnings) == 0), warnings
 
 def validate_reference_list_relaxed(reference_list: List[dict], format_type: str = "auto") -> Tuple[bool, List[Dict], List[Dict]]:

@@ -1,3 +1,4 @@
+#app.py
 import streamlit as st
 
 # 引入模組
@@ -107,10 +108,12 @@ elif uploaded_file:
     # 3. 自動執行交叉比對
     if st.session_state.in_text_citations and st.session_state.reference_list:
         if st.session_state.get("block_compare", False):
-            st.info("⛔ 因參考文獻作者/年份為必要比對資訊且未能可靠解析，已暫停交叉比對（仍可查看逐筆解析結果）。")
+            # [修改] 使用 get_text
+            st.info(get_text("auto_compare_blocked_msg"))
         else:
             if not st.session_state.get('comparison_done', False):
-                with st.spinner("正在自動進行交叉比對..."):
+                # [修改] 使用 get_text
+                with st.spinner(get_text("auto_compare_spinner")):
                     run_comparison()
 
     # 4. 優先顯示：交叉比對結果
@@ -123,7 +126,7 @@ elif uploaded_file:
 
     # 6. 參考文獻逐筆解析結果
     if st.session_state.reference_list:
-        st.subheader("📌 參考文獻逐筆解析結果")
+        st.subheader(get_text("ref_detail_header"))  # [修改] 替換中文
         from ui.components import display_reference_with_details
         
         parsed_refs = st.session_state.reference_list
