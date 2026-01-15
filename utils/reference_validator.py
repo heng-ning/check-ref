@@ -204,6 +204,22 @@ def validate_required_fields(ref: dict, format_type: str) -> Tuple[bool, List[st
     original = ref.get("original", "")
     
     if format_type == "APA":
+        # 檢測跨頁斷行：如果包含多組「作者 + 年份」模式，表示合併了多筆文獻
+        # 模式1：英文作者 + 年份（如 "Smith, J. (2020)... Wang, L. (2021)"）
+        author_year_pattern = r'[A-Z][a-z]+,\s*[A-Z]\..*?\(\d{4}[a-z]?\)'
+        matches = list(re.finditer(author_year_pattern, original))
+        
+        if len(matches) >= 2:
+            # 有2組以上作者+年份 → 可能是跨頁合併
+            errors.append("作者或年份資訊不足, 可能因文獻未提供, 系統解析限制或年份非西元年格式（目前僅支援西元年），影響比對")
+            return (False, errors)
+        
+        # 模式2：檢查是否有「句號 + 大寫字母 + 逗號」（典型的新作者開頭）
+        # 例如："...7511. Wan Mahiyuddin, W. R.,"
+        if re.search(r'\.\s+[A-Z][a-z]+,\s*[A-Z]\.', original):
+            errors.append("作者或年份資訊不足, 可能因文獻未提供, 系統解析限制或年份非西元年格式（目前僅支援西元年），影響比對")
+            return (False, errors)
+        
         # authors 欄位在 APA 可能不同
         authors = ref.get("authors") or ref.get("author")
         has_author_error = not authors or (isinstance(authors, list) and len(authors) == 0)
