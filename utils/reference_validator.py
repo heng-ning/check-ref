@@ -211,9 +211,10 @@ def validate_required_fields(ref: dict, format_type: str) -> Tuple[bool, List[st
 
       year = ref.get("year")
       if not year:
-          has_year_in_original = bool(re.search(r'(?<!\d)(19\d{2}|20[0-2]\d)(?!\d)|民國\s*\d{2,3}', original))
+          # 只檢查原文是否有西元年 (不含民國)
+          has_year_in_original = bool(re.search(r'(?<!\d)(19\d{2}|20[0-2]\d)(?!\d)', original))
           if not has_year_in_original:
-              errors.append("年份資訊不足（可能因文獻未提供或系統解析限制，影響比對）")
+              errors.append("年份資訊不足（可能因文獻未提供或系統解析限制或年份非西元年格式（目前僅支援西元年比對），影響比對）")
 
     return (len(errors) == 0), errors
 

@@ -42,6 +42,16 @@ def merge_references_unified(paragraphs):
         # 2. 判斷是否為新文獻開始 (Priority High)
         is_new_start = False
 
+        # 特殊處理：中文機構作者 + 民國年 + URL 模式
+        # 例如：「衛生福利部國民健康署,台灣腎臟醫學會【早期慢性腎臟病照護手冊】,民 111」
+        if re.match(r'^[\u4e00-\u9fa5]', para) and re.search(r'民\s*\d{2,3}', para):
+            is_new_start = True
+
+        # 特殊處理：英文機構作者 + 分號 + 地點 + 年份
+        # 例如：「United States Renal Data System . National Institutes ... ; Bethesda, MD: 2018.」
+        elif re.search(r';\s*[A-Z][a-z]+,\s*[A-Z]{2}:\s*\d{4}\.', para):
+            is_new_start = True
+
         # 特殊判斷:「取自 URL (年月日)」後面接作者
         # 例如: "...取自https://example.com (2023年06月06日) 張三、李四(2024)..."
         if re.search(r'https?://[^\s。)）]+\s*[（(]\s*\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日\s*[)）]\s*$', current_ref):
@@ -57,6 +67,10 @@ def merge_references_unified(paragraphs):
             # 前一行以1-2個中文字結尾(非句號),當前行是單字+頓號開頭 → 強制延續
             is_continuation = True
             # 直接跳到執行動作,不做任何新文獻判斷
+        # A0. 民國年格式（優先於西元年）
+        elif re.match(r'^[\u4e00-\u9fa5]{2,4}.*?[（(]民\s*\d{2,3}[)）]', para):
+            is_new_start = True
+
         elif re.match(r'^[\u4e00-\u9fa5]+.*?[（(]\d{4}[)）]', para):
             # A. 中文標準（含年份在同一行）
             is_new_start = True
@@ -115,8 +129,14 @@ def merge_references_unified(paragraphs):
         # 3. 判斷是否為延續 (Priority Low)
         is_continuation = False
         if not is_new_start:
+            # 排除：中文開頭 + 包含民國年 → 不視為延續
+            if re.match(r'^[\u4e00-\u9fa5]', para) and re.search(r'民\s*\d{2,3}', para):
+                pass  # 不設為延續
+            # 排除：包含分號+地點+年份模式 → 不視為延續  
+            elif re.search(r';\s*[A-Z][a-z]+,\s*[A-Z]{2}:\s*\d{4}\.', para):
+                pass  # 不設為延續
             # A. 包含 DOI 或 arXiv
-            if re.search(r'(doi:10\.|doi\.org|arXiv:)', para, re.IGNORECASE):
+            elif re.search(r'(doi:10\.|doi\.org|arXiv:)', para, re.IGNORECASE):
                 is_continuation = True
             # B. 會議資訊 (全大寫+年份)
             elif re.match(r'^([A-Z]{2,}(?:\s+[A-Z]{2,})*)\s+\d{4}', para):
