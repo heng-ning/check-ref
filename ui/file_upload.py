@@ -69,43 +69,22 @@ def handle_file_upload(uploaded_file):
     st.markdown("---")
     return all_paragraphs
 
-
 def display_citation_analysis(content_paras):
     """
-    顯示內文引用分析結果
+    顯示內文引用分析結果（使用 session 中已解析的資料）
     """
     # 如果被標記為 block_compare（作者/年份不足），跳過內文引用分析
     if st.session_state.get("block_compare", False):
         return []
 
     st.subheader(get_text("citation_analysis"))
-    if not content_paras:
+    
+    # 直接從 session 讀取已解析的引用資料
+    in_text_citations = st.session_state.get('in_text_citations', [])
+    
+    if not in_text_citations:
         st.warning(get_text("no_content"))
         return []
-
-    # 傳入已解析的參考文獻列表（若 block_compare=True，也仍可分析內文引用）
-    reference_list = st.session_state.get('reference_list', [])
-    in_text_citations = extract_in_text_citations(content_paras, reference_list)
-
-    # 轉換為可序列化格式
-    serializable_citations = []
-    for cite in in_text_citations:
-        cite_dict = {
-            'author': cite.get('author'),
-            'co_author': cite.get('co_author'),
-            'year': cite.get('year'),
-            'ref_number': cite.get('ref_number'),
-            'all_numbers': cite.get('all_numbers'),
-            'original': cite.get('original'),
-            'normalized': cite.get('normalized'),
-            'position': cite.get('position'),
-            'type': cite.get('type'),
-            'format': cite.get('format'),
-            'matched_ref_index': cite.get('matched_ref_index')
-        }
-        serializable_citations.append(cite_dict)
-
-    st.session_state.in_text_citations = serializable_citations
 
     # 統計卡片
     apa_count = sum(1 for c in in_text_citations if c.get('format') == 'APA')
@@ -124,7 +103,6 @@ def display_citation_analysis(content_paras):
     st.markdown("---")
 
     return in_text_citations
-
 
 def display_reference_parsing(ref_paras):
     """
@@ -224,13 +202,7 @@ def display_reference_parsing(ref_paras):
 
     elif critical_ok:
         st.success("✅ 參考文獻必要條件通過，且欄位解析完整度良好。")
-
-    # ===== ✅ 逐筆顯示：每一筆都顯示欄位解析結果 =====
     st.markdown("---")
-    st.subheader("📌 參考文獻逐筆解析結果")
-
-    for idx, ref in enumerate(parsed_refs, 1):
-        display_reference_with_details(ref, idx, format_type=format_type)
-
-    st.markdown("---")
+    # ===== 儲存格式類型到 session，供後續顯示使用 =====
+    st.session_state["format_type"] = format_type
     return parsed_refs

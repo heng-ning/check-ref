@@ -197,7 +197,3 @@ def display_comparison_results():
     
     with tab3:
         display_year_error_tab()
-    
-    st.markdown("---")
-    
-    display_export_section()

@@ -75,20 +75,37 @@ elif uploaded_file:
     
     # 讀取檔案
     all_paragraphs = handle_file_upload(uploaded_file)
-    
+
     # 分離內文與參考文獻
     content_paras, ref_paras, ref_start_idx, ref_keyword = classify_document_sections(all_paragraphs)
-    
-    # 先解析參考文獻
+
+    # 1. 先解析參考文獻（總覽統計）
     display_reference_parsing(ref_paras)
 
-    # 再分析內文引用（使用已解析的參考文獻）
-    display_citation_analysis(content_paras)
-    
-    # 3. [新增] 自動執行交叉比對
-    # 只要有解析出資料，且還沒做過比對（或者希望每次重新解析都跑），就自動執行
+    # 2. 分析內文引用（但先不顯示，只解析存入 session）
+    reference_list = st.session_state.get('reference_list', [])
+    in_text_citations = extract_in_text_citations(content_paras, reference_list)
+    # 轉換為可序列化格式並存入 session
+    serializable_citations = []
+    for cite in in_text_citations:
+        cite_dict = {
+            'author': cite.get('author'),
+            'co_author': cite.get('co_author'),
+            'year': cite.get('year'),
+            'ref_number': cite.get('ref_number'),
+            'all_numbers': cite.get('all_numbers'),
+            'original': cite.get('original'),
+            'normalized': cite.get('normalized'),
+            'position': cite.get('position'),
+            'type': cite.get('type'),
+            'format': cite.get('format'),
+            'matched_ref_index': cite.get('matched_ref_index')
+        }
+        serializable_citations.append(cite_dict)
+    st.session_state.in_text_citations = serializable_citations
+
+    # 3. 自動執行交叉比對
     if st.session_state.in_text_citations and st.session_state.reference_list:
-    # file_upload.py 會寫入 block_compare：True 表示作者/年份必要資訊不足
         if st.session_state.get("block_compare", False):
             st.info("⛔ 因參考文獻作者/年份為必要比對資訊且未能可靠解析，已暫停交叉比對（仍可查看逐筆解析結果）。")
         else:
@@ -96,14 +113,28 @@ elif uploaded_file:
                 with st.spinner("正在自動進行交叉比對..."):
                     run_comparison()
 
-# ==================== 交叉比對分析結果區 ====================
-# [修改] 這裡可以選擇是否還要顯示「手動比對按鈕」。
-# 如果您希望完全自動化，可以把 display_comparison_button() 拿掉，
-# 或者保留它當作「重新整理」的按鈕。
+    # 4. 優先顯示：交叉比對結果
+    if st.session_state.get('comparison_done', False):
+        display_comparison_results()
+        st.markdown("---")
 
-# 顯示結果 (只要 comparison_done 為 True 就顯示)
-if st.session_state.get('comparison_done', False):
-    display_comparison_results()
-# else:
-#     # 如果還沒完成比對 (例如解析失敗)，顯示手動按鈕讓使用者嘗試
-#     display_comparison_button()
+    # 5. 顯示內文引用分析（使用已存在 session 中的資料）
+    display_citation_analysis(content_paras)
+
+    # 6. 參考文獻逐筆解析結果
+    if st.session_state.reference_list:
+        st.subheader("📌 參考文獻逐筆解析結果")
+        from ui.components import display_reference_with_details
+        
+        parsed_refs = st.session_state.reference_list
+        format_type = st.session_state.get("format_type", "APA")
+        
+        for idx, ref in enumerate(parsed_refs, 1):
+            display_reference_with_details(ref, idx, format_type=format_type)
+        
+        st.markdown("---")
+
+    # 7. 匯出比對結果
+    if st.session_state.get('comparison_done', False):
+        from ui.comparison_ui import display_export_section
+        display_export_section()
