@@ -158,7 +158,7 @@ def display_reference_parsing(ref_paras):
     # ===== 頁首總結提示（新增：列出是哪幾筆 + 可展開細節）=====
     if not critical_ok:
         st.error(
-            f"⛔ 有 {len(critical_results)} 筆參考文獻的作者/年份屬於必要比對資訊，系統未能可靠取得；"
+            f"⛔ 有 {len(critical_results)} 筆參考文獻的必要比對資訊，系統未能可靠取得；"
             f"將暫停交叉比對，但仍會顯示所有文獻的欄位解析結果。"
         )
         st.info("💡 建議修正上述條目後重新上傳，以提升比對準確性。")
@@ -168,7 +168,7 @@ def display_reference_parsing(ref_paras):
         st.markdown("**⛔ 必要條件問題筆號：** " + "、".join(map(str, critical_idxs)))
 
         # ✅ 新增：展開查看每筆的原文與錯誤原因
-        with st.expander("查看必要條件問題明細（作者/年份，會擋比對）", expanded=False):
+        with st.expander("查看必要條件問題明細", expanded=False):
             for r in critical_results:
                 idx = r["index"]
                 full_original = parsed_refs[idx - 1].get("original", "")

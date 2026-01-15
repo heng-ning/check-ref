@@ -197,7 +197,7 @@ from typing import Dict, List, Tuple
 
 def validate_required_fields(ref: dict, format_type: str) -> Tuple[bool, List[str]]:
     """
-    只檢查『交叉比對必要條件』：作者 + 年份
+    只檢查『交叉比對必要條件』：作者 + 年份 + 結尾完整性
     缺任一項 -> critical error
     """
     errors = []
@@ -205,22 +205,19 @@ def validate_required_fields(ref: dict, format_type: str) -> Tuple[bool, List[st
     
     if format_type == "APA":
         # 檢測跨頁斷行：如果包含多組「作者 + 年份」模式，表示合併了多筆文獻
-        # 模式1：英文作者 + 年份（如 "Smith, J. (2020)... Wang, L. (2021)"）
         author_year_pattern = r'[A-Z][a-z]+,\s*[A-Z]\..*?\(\d{4}[a-z]?\)'
         matches = list(re.finditer(author_year_pattern, original))
         
         if len(matches) >= 2:
-            # 有2組以上作者+年份 → 可能是跨頁合併
             errors.append("作者或年份資訊不足, 可能因文獻未提供, 系統解析限制或年份非西元年格式（目前僅支援西元年），影響比對")
             return (False, errors)
         
         # 模式2：檢查是否有「句號 + 大寫字母 + 逗號」（典型的新作者開頭）
-        # 例如："...7511. Wan Mahiyuddin, W. R.,"
         if re.search(r'\.\s+[A-Z][a-z]+,\s*[A-Z]\.', original):
             errors.append("作者或年份資訊不足, 可能因文獻未提供, 系統解析限制或年份非西元年格式（目前僅支援西元年），影響比對")
             return (False, errors)
         
-        # authors 欄位在 APA 可能不同
+        # authors 欄位檢查
         authors = ref.get("authors") or ref.get("author")
         has_author_error = not authors or (isinstance(authors, list) and len(authors) == 0)
         
@@ -228,20 +225,37 @@ def validate_required_fields(ref: dict, format_type: str) -> Tuple[bool, List[st
         has_year_error = False
         
         if not year:
-            # 只檢查原文是否有西元年 (不含民國)
             has_year_in_original = bool(re.search(r'(?<!\d)(19\d{2}|20[0-2]\d)(?!\d)', original))
             if not has_year_in_original:
                 has_year_error = True
         else:
-            # 如果有解析到年份，檢查是否為純數字的西元年（不接受 2023a 這種格式）
             year_str = str(year)
-            # 必須是純數字的西元年，不能有字母後綴
             if not re.match(r'^(19\d{2}|20[0-2]\d)$', year_str):
                 has_year_error = True
         
         # 只要有任一錯誤，就回報統一訊息
         if has_author_error or has_year_error:
             errors.append("作者或年份資訊不足, 可能因文獻未提供, 系統解析限制或年份非西元年格式（目前僅支援西元年），影響比對")
+        
+        # ========== 結尾完整性檢查 ==========
+        original_stripped = original.strip()
+        
+        # 正常結尾的模式
+        has_proper_ending = (
+            original_stripped.endswith('.') or  # 句號
+            original_stripped.endswith('。') or  # 中文句號
+            re.search(r'https?://[^\s]+$', original_stripped) or  # URL
+            re.search(r'doi[:\s]*10\.\d+/[^\s]+$', original_stripped, re.IGNORECASE) or  # DOI
+            re.search(r'\d+\s*[-–—]\s*\d+\.?$', original_stripped) or  # 頁碼
+            re.search(r'\)\s*\.?$', original_stripped)  # 括號結尾
+        )
+        
+        # 如果沒有正常結尾，檢查是否以「單詞」結尾
+        if not has_proper_ending:
+            ends_with_word = re.search(r'[A-Za-z]{2,}$', original_stripped)
+            
+            if ends_with_word:
+                errors.append("參考文獻不完整，結尾異常，可能因換頁斷行導致內容遺失，影響比對")
 
     return (len(errors) == 0), errors
 
