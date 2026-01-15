@@ -202,22 +202,32 @@ def validate_required_fields(ref: dict, format_type: str) -> Tuple[bool, List[st
     """
     errors = []
     original = ref.get("original", "")
+    
     if format_type == "APA":
-      # authors 欄位在 APA 可能不同
-      authors = ref.get("authors") or ref.get("author")
-
-      if not authors or (isinstance(authors, list) and len(authors) == 0):
-          errors.append("作者資訊不足（可能因文獻未提供或系統解析限制，影響比對）")
-
-      year = ref.get("year")
-      if not year:
-          # 只檢查原文是否有西元年 (不含民國)
-          has_year_in_original = bool(re.search(r'(?<!\d)(19\d{2}|20[0-2]\d)(?!\d)', original))
-          if not has_year_in_original:
-              errors.append("年份資訊不足（可能因文獻未提供或系統解析限制或年份非西元年格式（目前僅支援西元年比對），影響比對）")
+        # authors 欄位在 APA 可能不同
+        authors = ref.get("authors") or ref.get("author")
+        has_author_error = not authors or (isinstance(authors, list) and len(authors) == 0)
+        
+        year = ref.get("year")
+        has_year_error = False
+        
+        if not year:
+            # 只檢查原文是否有西元年 (不含民國)
+            has_year_in_original = bool(re.search(r'(?<!\d)(19\d{2}|20[0-2]\d)(?!\d)', original))
+            if not has_year_in_original:
+                has_year_error = True
+        else:
+            # 如果有解析到年份，檢查是否為純數字的西元年（不接受 2023a 這種格式）
+            year_str = str(year)
+            # 必須是純數字的西元年，不能有字母後綴
+            if not re.match(r'^(19\d{2}|20[0-2]\d)$', year_str):
+                has_year_error = True
+        
+        # 只要有任一錯誤，就回報統一訊息
+        if has_author_error or has_year_error:
+            errors.append("作者或年份資訊不足, 可能因文獻未提供, 系統解析限制或年份非西元年格式（目前僅支援西元年），影響比對")
 
     return (len(errors) == 0), errors
-
 
 def validate_optional_fields(ref: dict, format_type: str) -> Tuple[bool, List[str]]:
     """
@@ -244,7 +254,6 @@ def validate_optional_fields(ref: dict, format_type: str) -> Tuple[bool, List[st
         warnings.append("出處／來源資訊未能解析（可能因格式非標準或解析限制，不影響比對）")
 
     return (len(warnings) == 0), warnings
-
 
 def validate_reference_list_relaxed(reference_list: List[dict], format_type: str = "auto") -> Tuple[bool, List[Dict], List[Dict]]:
     """

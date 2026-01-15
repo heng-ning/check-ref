@@ -71,8 +71,8 @@ def merge_references_unified(paragraphs):
         elif re.match(r'^[\u4e00-\u9fa5]{2,4}.*?[（(]民\s*\d{2,3}[)）]', para):
             is_new_start = True
 
-        elif re.match(r'^[\u4e00-\u9fa5]+.*?[（(]\d{4}[)）]', para):
-            # A. 中文標準（含年份在同一行）
+        elif re.match(r'^[\u4e00-\u9fa5]+.*?[（(]\d{4}[a-z]?[)）]', para):
+            # A. 中文標準（含年份在同一行，支援 2003a 格式）
             is_new_start = True
 
         # A2. 中文作者列表開頭(即使年份不在同一行)
@@ -85,8 +85,8 @@ def merge_references_unified(paragraphs):
             # 排除:書名號開頭
             elif re.match(r'^[《〈「『\d]', para):
                 pass
-            # 如果當前行包含年份括號,肯定是新文獻
-            elif re.search(r'[（(]\d{4}[)）]', para):
+            # 如果當前行包含年份括號,肯定是新文獻（支援年份後綴）
+            elif re.search(r'[（(]\d{4}[a-z]?[)）]', para):
                 is_new_start = True
             # 如果前一筆已經完整(有句號結尾),當前是作者列表 → 新文獻
             elif current_ref and re.search(r'[。.]$', current_ref.strip()):
@@ -151,8 +151,8 @@ def merge_references_unified(paragraphs):
             elif current_ref and re.search(r'[\u4e00-\u9fa5]{2,4}[、，][\u4e00-\u9fa5]{2,4}', current_ref):
                 # 當前行是中文字開頭,且包含頓號/逗號(作者列表特徵)
                 if re.match(r'^[\u4e00-\u9fa5]', para) and re.search(r'[、，]', para):
-                    # 如果包含年份括號,不視為延續(是新文獻)
-                    if re.search(r'[（(]\d{4}[)）]', para):
+                    # 如果包含年份括號,不視為延續(是新文獻)（支援年份後綴）
+                    if re.search(r'[（(]\d{4}[a-z]?[)）]', para):
                         pass  # 不設為延續,讓它走新文獻判斷
                     else:
                         is_continuation = True

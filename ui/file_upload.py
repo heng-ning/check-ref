@@ -74,6 +74,10 @@ def display_citation_analysis(content_paras):
     """
     顯示內文引用分析結果
     """
+    # 如果被標記為 block_compare（作者/年份不足），跳過內文引用分析
+    if st.session_state.get("block_compare", False):
+        return []
+
     st.subheader(get_text("citation_analysis"))
     if not content_paras:
         st.warning(get_text("no_content"))
