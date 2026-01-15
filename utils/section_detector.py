@@ -4,7 +4,7 @@ def is_appendix_heading(text):
     """判斷是否為附錄標題"""
     text = text.strip()
     # 支援：Appendix, 附錄, 附錄一, Appendix A
-    pattern = r'^([【〔（(]?\s*)?((\d+|[IVXLCDM]+|[一二三四五六七八九十壹貳參肆伍陸柒捌玖拾]+)[、．. ]?)?\s*(附\s*錄|APPENDIX)(\s*[A-Z0-9一二三四五六七八九十]+)?([：:\.\s].*)?$'
+    pattern = r'^([【〔（(]?\s*)?((\d+|[IVXLCDM]+|[一二三四五六七八九十壹貳參肆伍陸柒捌玖拾]+)[、．. ]?)?\s*(附\s*[錄件]|APPENDIX)(\s*[A-Z0-9一二三四五六七八九十]+)?([：:\.\s].*)?$'
     return bool(re.match(pattern, text, re.IGNORECASE))
 
 def is_reference_heading_flexible(text):
