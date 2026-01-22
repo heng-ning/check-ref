@@ -121,7 +121,7 @@ TRANSLATIONS = {
         "csv_header_year": "年份",
         "csv_header_detail": "錯誤詳情",
         "err_detail_format": "內文:{cited}→正確:{correct}",
-        "ref_critical_error_msg": "⛔ 有 {count} 筆參考文獻的必要比對資訊，系統未能可靠取得；將暫停交叉比對，但仍會顯示所有文獻的欄位解析結果。",
+        "ref_critical_error_msg": "⛔ 有 {count} 筆參考文獻的必要比對資訊，系統未能可靠取得；可能造成交叉比對結果錯誤，但仍會顯示所有文獻的欄位解析結果。",
         "ref_fix_suggestion": "💡 建議修正上述條目後重新上傳，以提升比對準確性。",
         "ref_critical_label": "**⛔ 必要條件問題筆號：**",
         "ref_critical_expander": "查看必要條件問題明細",
@@ -148,7 +148,8 @@ TRANSLATIONS = {
         "err_title_missing": "缺少文獻標題",
         "err_journal_info_missing": "缺少期刊名稱或出版資訊",
         "err_apa_numbered": "APA 格式不應包含編號 [{number}]",
-        
+
+        "ref_skip_info": "將跳過 {total} 筆中的 {skip} 筆，繼續比對其餘 {valid} 筆文獻",
 },
     "en": {
         # App Interface
@@ -267,7 +268,7 @@ TRANSLATIONS = {
         "csv_header_year": "Year",
         "csv_header_detail": "Error Detail",
         "err_detail_format": "In-Text:{cited}→Correct:{correct}",
-        "ref_critical_error_msg": "⛔ Critical parsing issues found in {count} references. Cross-checking is paused, but parsing results are displayed.",
+        "ref_critical_error_msg": "⛔ Critical parsing issues found in {count} references. Cross-checking may be inaccurate, but parsing results are displayed.",
         "ref_fix_suggestion": "💡 Tip: Correct these entries and re-upload for accurate cross-checking.",
         "ref_critical_label": "**⛔ Critical Issue Indices:**",
         "ref_critical_expander": "View Critical Issue Details",

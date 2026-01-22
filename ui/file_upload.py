@@ -142,34 +142,33 @@ def display_reference_parsing(ref_paras):
     parsed_refs = [process_single_reference(r) for r in merged_refs]
 
     # ===== 折衷版驗證（必要條件 vs 非必要欄位警告）=====
-    critical_ok, critical_results, warning_results = validate_reference_list_relaxed(parsed_refs, format_type)
+    valid_refs, skipped_refs, warning_refs = validate_reference_list_relaxed(parsed_refs, format_type)
+    # ✅ 寫入可比對的文獻列表（排除被跳過的）
+    st.session_state.reference_list = valid_refs
 
-    # ✅ 永遠寫入 session，確保每一筆都能顯示解析結果
-    st.session_state.reference_list = parsed_refs
-
-    # ✅ 建立每筆 index -> messages 的 map，交給每筆顯示用
-    critical_map = {r["index"]: r.get("errors", []) for r in critical_results}
-    warning_map = {w["index"]: w.get("warnings", []) for w in warning_results}
+    # ✅ 建立每筆 index -> messages 的 map
+    critical_map = {r["index"]: r.get("errors", []) for r in skipped_refs}
+    warning_map = {w["index"]: w.get("warnings", []) for w in warning_refs}
     st.session_state["ref_critical_map"] = critical_map
     st.session_state["ref_warning_map"] = warning_map
 
-    # ✅ 用這個 gate 交叉比對（作者/年份不足才擋）
-    st.session_state["block_compare"] = (not critical_ok)
+    # ✅ 只有在完全沒有可比對的文獻時才阻擋
+    st.session_state["block_compare"] = (len(valid_refs) == 0)
 
     # ===== 頁首總結提示（新增：列出是哪幾筆 + 可展開細節）=====
-    if not critical_ok:
+    if skipped_refs:
         st.error(
-            get_text("ref_critical_error_msg", count=len(critical_results))
+            get_text("ref_critical_error_msg", count=len(skipped_refs))
         )
-        st.info(get_text("ref_fix_suggestion"))
+        st.info(get_text("ref_skip_info", valid=len(valid_refs), skip=len(skipped_refs), total=len(parsed_refs)))
 
         # ✅ 新增：列出筆號
-        critical_idxs = [r["index"] for r in critical_results]
-        st.markdown(get_text("ref_critical_label") + " " + "、".join(map(str, critical_idxs)))
+        skipped_idxs = [r["index"] for r in skipped_refs]
+        st.markdown(get_text("ref_critical_label") + " " + "、".join(map(str, skipped_idxs)))
 
         # ✅ 新增：展開查看每筆的原文與錯誤原因
         with st.expander(get_text("ref_critical_expander"), expanded=False):
-            for r in critical_results:
+            for r in skipped_refs:
                 idx = r["index"]
                 full_original = parsed_refs[idx - 1].get("original", "")
 
@@ -179,18 +178,18 @@ def display_reference_parsing(ref_paras):
                     st.error(msg)
                 st.markdown("---")
 
-    if warning_results:
+    if warning_refs:
         st.warning(
-            get_text("ref_warning_msg", count=len(warning_results))
+            get_text("ref_warning_msg", count=len(warning_refs))
         )
 
         # ✅ 新增：列出筆號
-        warning_idxs = [w["index"] for w in warning_results]
+        warning_idxs = [w["index"] for w in warning_refs]
         st.markdown(get_text("ref_warning_label") + " " + "、".join(map(str, warning_idxs)))
 
         # ✅ 新增：展開查看每筆的原文與警告原因
         with st.expander(get_text("ref_warning_expander"), expanded=False):
-            for w in warning_results:
+            for w in warning_refs:
                 idx = w["index"]
                 full_original = parsed_refs[idx - 1].get("original", "")
 
@@ -200,7 +199,7 @@ def display_reference_parsing(ref_paras):
                     st.warning(msg)
                 st.markdown("---")
 
-    elif critical_ok:
+    elif len(valid_refs) == len(parsed_refs):
         st.success(get_text("ref_parse_success_msg"))
     
     st.markdown("---")

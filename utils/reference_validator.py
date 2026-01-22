@@ -272,7 +272,19 @@ def validate_required_fields(ref: dict, format_type: str) -> Tuple[bool, List[st
             ends_with_word = re.search(r'[A-Za-z]{2,}$', original_stripped)
             
             if ends_with_word:
-                errors.append(get_text("err_incomplete_ending"))
+                # 排除正常的期刊名稱結尾（如 "Community Mental Health"）
+                # 檢查是否以常見期刊關鍵字結尾
+                common_journal_words = r'(Health|Journal|Review|Science|Research|Studies|Medicine|Psychology|Education|Management|Quarterly|Annual|International|American|European|British|Proceedings|Transactions|Letters|Reports|Communications)'
+                ends_with_journal_word = bool(re.search(common_journal_words + r'$', original_stripped, re.IGNORECASE))
+                
+                # 排除全大寫頁尾（如 "COMMUNICATION RESEARCH REPORTS"）
+                words = original_stripped.split()
+                last_words = ' '.join(words[-5:]) if len(words) >= 5 else original_stripped
+                is_all_caps_footer = bool(re.search(r'\b[A-Z]{2,}(\s+[A-Z]{2,})+\s*$', last_words))
+                
+                # 只有在不是期刊名稱且不是全大寫頁尾時才報錯
+                if not ends_with_journal_word and not is_all_caps_footer:
+                    errors.append(get_text("err_incomplete_ending"))
 
     return (len(errors) == 0), errors
 
@@ -317,9 +329,9 @@ def validate_reference_list_relaxed(reference_list: List[dict], format_type: str
         first_ref = reference_list[0]
         format_type = "IEEE" if first_ref.get("ref_number") else "APA"
 
-    critical_ok = True
-    critical_results = []
-    warning_results = []
+    valid_refs = []          # 新增：可比對的文獻
+    skipped_refs = []        # 改名：原本的 critical_results
+    warning_refs = []        # 改名：原本的 warning_results
 
     for i, ref in enumerate(reference_list, 1):
         ok_req, req_errors = validate_required_fields(ref, format_type)
@@ -329,22 +341,26 @@ def validate_reference_list_relaxed(reference_list: List[dict], format_type: str
         short_original = short_original[:100] + "..." if len(short_original) > 100 else short_original
 
         if not ok_req:
-            critical_ok = False
-            critical_results.append({
+            # 有致命錯誤，跳過此筆文獻
+            skipped_refs.append({
                 "index": i,
                 "ref_number": ref.get("ref_number", i),
                 "original": short_original,
                 "errors": req_errors,
                 "format_type": format_type
             })
+        else:
+            # 沒有致命錯誤，加入可比對列表
+            valid_refs.append(ref)
+            
+            # 如果有警告，同時記錄
+            if not ok_opt:
+                warning_refs.append({
+                    "index": i,
+                    "ref_number": ref.get("ref_number", i),
+                    "original": short_original,
+                    "warnings": opt_warnings,
+                    "format_type": format_type
+                })
 
-        if not ok_opt:
-            warning_results.append({
-                "index": i,
-                "ref_number": ref.get("ref_number", i),
-                "original": short_original,
-                "warnings": opt_warnings,
-                "format_type": format_type
-            })
-
-    return critical_ok, critical_results, warning_results
+    return valid_refs, skipped_refs, warning_refs
