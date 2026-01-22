@@ -32,9 +32,9 @@ def validate_apa_format(ref: dict, index: int) -> Tuple[bool, List[str]]:
     if not year:
         errors.append(get_text("err_year_missing"))
     else:
-        # 驗證年份格式
-        year_str = str(year)
-        if not re.search(r'(19\d{2}|20[0-2]\d)', year_str):
+        # 驗證年份格式 (支援 1600-2099 + a-z)
+        year_str = str(year).strip()
+        if not re.search(r'^(1[6-9]\d{2}|20\d{2})([a-z])?$', year_str):
             errors.append(get_text("err_year_format", year=year))
     
     # 3. 必須有標題
@@ -236,13 +236,18 @@ def validate_required_fields(ref: dict, format_type: str) -> Tuple[bool, List[st
         year = ref.get("year")
         has_year_error = False
         
+        year_pattern = r'^(1[6-9]\d{2}|20\d{2})([a-z])?$'
+        
+        # 用於從原文搜尋的寬鬆模式 (允許前後有非數字字符)
+        year_search_pattern = r'(?<!\d)(1[6-9]\d{2}|20\d{2})([a-z])?(?!\d)'
+
         if not year:
-            has_year_in_original = bool(re.search(r'(?<!\d)(19\d{2}|20[0-2]\d)(?!\d)', original))
+            has_year_in_original = bool(re.search(year_search_pattern, original))
             if not has_year_in_original:
                 has_year_error = True
         else:
-            year_str = str(year)
-            if not re.match(r'^(19\d{2}|20[0-2]\d)$', year_str):
+            year_str = str(year).strip()
+            if not re.match(year_pattern, year_str):
                 has_year_error = True
         
         # 只要有任一錯誤，就回報統一訊息

@@ -80,8 +80,17 @@ def is_page_noise(text):
         return True
 
     # 4. 版權頁尾 (Copyright footer) - 短的版權宣告
-    if (text.startswith('©') or text.lower().startswith('copyright') or text.lower().startswith('all rights')) and len(text) < 60:
-        return True
+    # 4. 版權頁尾 (Copyright footer) - 放寬長度限制，並支援常見期刊格式
+    # IEEE 範例: 978-1-6654-6537-8/22/$31.00 ©2022 IEEE
+    text_lower = text.lower()
+    if (text.startswith('©') or 
+        text_lower.startswith('copyright') or 
+        '©' in text or  # 版權符號出現在中間
+        text_lower.startswith('all rights reserved')):
+        
+        # 如果長度適中（例如小於 150 字），通常是頁尾宣告，應視為雜訊
+        if len(text) < 150:
+            return True
 
     # 5. IEEE Xplore 下載宣告
     if "authorized licensed use limited to" in text.lower() and "ieee xplore" in text.lower():
@@ -133,12 +142,12 @@ def extract_reference_section_improved(paragraphs):
         
         if not para: continue
         
+        if is_page_noise(para):
+            continue
         # 1. 遇到附錄或作者簡介 -> 停止
         stop_keywords = r'(biography|about the author|acknowledgments?|index|declaration|copyright|作者簡介|致謝|誌謝|索引|著作權聲明|論文著作權)'
         if is_appendix_heading(para) or re.match(r'^([0-9\.]+|[ivxlcdm]+|[一二三四五六七八九十]+)?\s*[\.\、\s]*' + stop_keywords, para, re.IGNORECASE):
             break    
-        if is_page_noise(para):
-            continue
         # 2. 過濾掉重複的參考文獻標題 (跨頁頁眉)
         if is_reference_heading_flexible(para):
             continue

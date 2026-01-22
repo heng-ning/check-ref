@@ -108,7 +108,17 @@ def extract_apa_en_detailed(ref_text):
     
     content_part = ref_text[year_match.end():].strip()
     content_part = content_part.lstrip('., ').strip()
-
+    # =========== 新增：截斷 Run-on References ===========
+    # 偵測模式：句號 + 空格 + 作者格式(姓, 名縮寫) + 年份格式
+    # 範例："... 383–390. Pratt, M. G. 1998. ..."
+    run_on_pattern = r'(\.\s+[A-Z][a-z]+,\s*[A-Z]\.\s*(?:[A-Z]\.\s*)?(?:\(\d{4}[a-z]?\)|\d{4}[a-z]?\.))'
+    
+    run_on_match = re.search(run_on_pattern, content_part)
+    if run_on_match:
+        # 截斷 content_part，丟棄後面的部分（因為這是單筆解析函數，無法回傳兩筆）
+        # 這樣至少能保證第一筆解析正確，不會把第二筆混入標題或出處
+        content_part = content_part[:run_on_match.start() + 1] # 保留句號
+    # ===================================================
     if result['doi']:
         # 移除 DOI（支援斷行情況）
         content_part = re.sub(r'(?:doi:|DOI:|https?://doi\.org/)\s*10\.\d{4,}/[^\s。]+', '', content_part)
