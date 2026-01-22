@@ -212,10 +212,23 @@ def validate_required_fields(ref: dict, format_type: str) -> Tuple[bool, List[st
             errors.append(get_text("err_author_year_missing"))
         
         # 模式2：檢查是否有「句號 + 大寫字母 + 逗號」（典型的新作者開頭）
-        if re.search(r'\.\s+[A-Z][a-z]+,\s*[A-Z]\.', original):
-            errors.append(get_text("err_author_year_missing"))
-            return (False, errors)
+        # if re.search(r'\.\s+[A-Z][a-z]+,\s*[A-Z]\.', original):
+        #     errors.append(get_text("err_author_year_missing"))
+        #     return (False, errors)
+        suspicious_pattern = r'\.\s+([A-Z][a-z]+,\s*[A-Z]\.)'
+        match = re.search(suspicious_pattern, original)
         
+        if match:
+            # 檢查這個匹配位置的前面是否有 "In " 或 "(Eds" 等編輯者特徵
+            start_pos = match.start()
+            preceding_text = original[:start_pos]
+            
+            # 如果前面有 "In " (忽略大小寫)，通常是書籍章節的編輯者，不是錯誤
+            is_editor_context = bool(re.search(r'\bIn\s+', preceding_text, re.IGNORECASE))
+            
+            if not is_editor_context:
+                errors.append(get_text("err_author_year_missing"))
+                return (False, errors)
         # authors 欄位檢查
         authors = ref.get("authors") or ref.get("author")
         has_author_error = not authors or (isinstance(authors, list) and len(authors) == 0)
